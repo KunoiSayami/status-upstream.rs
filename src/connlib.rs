@@ -20,21 +20,48 @@
 
 pub mod teamspeak {
     use tokio::net::UdpSocket;
+    use tokio::time::Duration;
 
-    const TEST_STRING: [u8; 34] = hex_literal::hex!("545333494e49543100650000880ef967a500613f9e6966788d480000000000000000");
+    const HEAD_DATA: [u8; 34] = hex_literal::hex!("545333494e49543100650000880ef967a500613f9e6966788d480000000000000000");
 
-    pub async fn check_server(remote_addr: &str) -> anyhow::Result<bool> {
+    // TODO: Support ipv6
+    pub async fn check_server(remote_addr: &str, timeout: u64) -> anyhow::Result<bool> {
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
-        socket.send_to(&TEST_STRING, remote_addr)
+        socket.send_to(&HEAD_DATA, remote_addr)
             .await
             .expect("Error on send");
 
         //socket.set_read_timeout(Duration::from_secs(1));
 
-        let mut buf = [0; 2048];
-        let (amt, _src) = socket.recv_from(&mut buf).await?;
+        let mut buf = [0; 64];
+        if let Ok((amt, _src)) = tokio::time::timeout(Duration::from_secs(timeout), socket.recv_from(&mut buf)).await? {
+            Ok(amt != 0)
+        } else {
+            Ok(false)
+        }
 
-        Ok(amt == 0)
+    }
+}
+
+pub mod ssh {
+
+    use tokio::time::Duration;
+    use tokio::io::AsyncReadExt;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpStream;
+
+    const HEAD_DATA: [u8; 21] = hex_literal::hex!("5353482d322e302d4f70656e5353485f382e310d0a");
+
+    pub async fn check_server(remote_addr: &str, timeout: u64) -> anyhow::Result<bool> {
+        if let Ok(mut socket) = tokio::time::timeout(Duration::from_secs(timeout), TcpStream::connect(remote_addr)).await? {
+            if let Ok(_) = tokio::time::timeout(Duration::from_secs(timeout), socket.write_all(&HEAD_DATA)).await? {
+                let mut buff = [0; 64];
+                socket.read(&mut buff).await?;
+                return Ok(String::from_utf8_lossy(&buff).contains("SSH"))
+            }
+        }
+
+        Ok(false)
     }
 }
