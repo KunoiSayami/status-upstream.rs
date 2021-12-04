@@ -19,6 +19,7 @@
  */
 #[allow(dead_code)]
 mod connlib;
+mod configure;
 
 #[tokio::main]
 async fn main(){
