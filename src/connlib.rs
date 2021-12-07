@@ -85,6 +85,19 @@ pub mod ssh {
 
 }
 
+pub mod http {
+    use crate::connlib::ServiceChecker;
+
+    pub struct HTTP {}
+
+    #[async_trait::async_trait]
+    impl ServiceChecker for HTTP {
+        async fn check_server(remote_addr: &str, timeout: u64) -> anyhow::Result<bool> {
+            reqwest::
+        }
+    }
+}
+
 
 pub use teamspeak::TeamSpeak;
 pub use ssh::SSH;
