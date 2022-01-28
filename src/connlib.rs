@@ -19,10 +19,26 @@
  */
 
 #[async_trait::async_trait]
-trait ServiceChecker {
-    async fn check_server(remote_addr: &str, timeout: u64) -> anyhow::Result<bool>;
+pub trait ServiceChecker {
+    async fn check_server(&self, timeout: u64) -> anyhow::Result<bool>;
 }
 
+#[async_trait::async_trait]
+impl<F: ?Sized + Sync + Send> ServiceChecker for Box<F>
+where
+    F: ServiceChecker + Sync + Send
+{
+    async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
+        (**self).check_server(timeout).await
+    }
+}
+
+
+pub enum ServiceType {
+    HTTP,
+    SSH,
+    TeamSpeak,
+}
 
 pub mod teamspeak {
     use tokio::net::UdpSocket;
@@ -31,16 +47,25 @@ pub mod teamspeak {
 
     const HEAD_DATA: [u8; 34] = hex_literal::hex!("545333494e49543100650000880ef967a500613f9e6966788d480000000000000000");
 
-    pub struct TeamSpeak {}
+    pub struct TeamSpeak {
+        remote_address: String,
 
+    }
 
+    impl TeamSpeak {
+        pub fn new(remote_address: &str) -> Self {
+            Self {
+                remote_address: remote_address.to_string()
+            }
+        }
+    }
     #[async_trait::async_trait]
     impl ServiceChecker for TeamSpeak {
         // TODO: Support ipv6
-        async fn check_server(remote_addr: &str, timeout: u64) -> anyhow::Result<bool> {
+        async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
             let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
-            socket.send_to(&HEAD_DATA, remote_addr)
+            socket.send_to(&HEAD_DATA, &self.remote_address)
                 .await?;
 
             //socket.set_read_timeout(Duration::from_secs(1));
@@ -66,12 +91,23 @@ pub mod ssh {
 
     const HEAD_DATA: [u8; 21] = hex_literal::hex!("5353482d322e302d4f70656e5353485f382e370d0a");
 
-    pub struct SSH {}
+    pub struct SSH {
+        remote_address: String,
+
+    }
+
+    impl SSH {
+        pub fn new(remote_address: &str) -> Self {
+            Self {
+                remote_address: remote_address.to_string()
+            }
+        }
+    }
 
     #[async_trait::async_trait]
     impl ServiceChecker for SSH {
-        async fn check_server(remote_addr: &str, timeout: u64) -> anyhow::Result<bool> {
-            if let Ok(mut socket) = tokio::time::timeout(Duration::from_secs(timeout), TcpStream::connect(remote_addr)).await? {
+        async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
+            if let Ok(mut socket) = tokio::time::timeout(Duration::from_secs(timeout), TcpStream::connect(&self.remote_address)).await? {
                 if let Ok(_) = tokio::time::timeout(Duration::from_secs(timeout), socket.write_all(&HEAD_DATA)).await? {
                     let mut buff = [0; 64];
                     if let Ok(_) = tokio::time::timeout(Duration::from_secs(timeout), socket.read(&mut buff)).await? {
@@ -86,14 +122,36 @@ pub mod ssh {
 }
 
 pub mod http {
+    use std::time::Duration;
     use crate::connlib::ServiceChecker;
+    use reqwest::ClientBuilder;
+    use reqwest::tls::Version;
 
-    pub struct HTTP {}
+    pub struct HTTP {
+        remote_address: String,
+
+    }
+
+    impl HTTP {
+        pub fn new(remote_address: &str) -> Self {
+            Self {
+                remote_address: remote_address.to_string()
+            }
+        }
+    }
 
     #[async_trait::async_trait]
     impl ServiceChecker for HTTP {
-        async fn check_server(remote_addr: &str, timeout: u64) -> anyhow::Result<bool> {
-            reqwest::
+        async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
+            let client = ClientBuilder::new()
+                .timeout(Duration::from_secs(timeout))
+                .min_tls_version(Version::TLS_1_2)
+                .build()?;
+            let req = client.get(&self.remote_address)
+                .send()
+                .await?;
+            let status = req.status().as_u16();
+            Ok((300 > status) && (status >= 200))
         }
     }
 }
@@ -101,3 +159,4 @@ pub mod http {
 
 pub use teamspeak::TeamSpeak;
 pub use ssh::SSH;
+pub use http::HTTP;

@@ -1,0 +1,14 @@
+[upstream]
+server = ""
+token = ""
+
+[servers]
+    [servers.sample1]
+    type = ""
+    address = ""
+    uuid = ""
+
+    [servers.sample2]
+    type = ""
+    address = ""
+    uuid = ""

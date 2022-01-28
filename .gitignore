@@ -8,3 +8,6 @@ target/
 
 .idea/
 .vscode/
+
+config/*.toml
+!config/*.default
