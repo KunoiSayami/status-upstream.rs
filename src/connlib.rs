@@ -1,8 +1,5 @@
 /*
- ** Copyright (C) 2021 KunoiSayami
- **
- ** This file is part of status-upstream.rs and is released under
- ** the AGPL v3 License: https://www.gnu.org/licenses/agpl-3.0.txt
+ ** Copyright (C) 2021-2022 KunoiSayami
  **
  ** This program is free software: you can redistribute it and/or modify
  ** it under the terms of the GNU Affero General Public License as published by
@@ -26,13 +23,12 @@ pub trait ServiceChecker {
 #[async_trait::async_trait]
 impl<F: ?Sized + Sync + Send> ServiceChecker for Box<F>
 where
-    F: ServiceChecker + Sync + Send
+    F: ServiceChecker + Sync + Send,
 {
     async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
         (**self).check_server(timeout).await
     }
 }
-
 
 pub enum ServiceType {
     HTTP,
@@ -41,21 +37,21 @@ pub enum ServiceType {
 }
 
 pub mod teamspeak {
+    use crate::connlib::ServiceChecker;
     use tokio::net::UdpSocket;
     use tokio::time::Duration;
-    use crate::connlib::ServiceChecker;
 
-    const HEAD_DATA: [u8; 34] = hex_literal::hex!("545333494e49543100650000880ef967a500613f9e6966788d480000000000000000");
+    const HEAD_DATA: [u8; 34] =
+        hex_literal::hex!("545333494e49543100650000880ef967a500613f9e6966788d480000000000000000");
 
     pub struct TeamSpeak {
         remote_address: String,
-
     }
 
     impl TeamSpeak {
         pub fn new(remote_address: &str) -> Self {
             Self {
-                remote_address: remote_address.to_string()
+                remote_address: remote_address.to_string(),
             }
         }
     }
@@ -65,13 +61,15 @@ pub mod teamspeak {
         async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
             let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
-            socket.send_to(&HEAD_DATA, &self.remote_address)
-                .await?;
+            socket.send_to(&HEAD_DATA, &self.remote_address).await?;
 
             //socket.set_read_timeout(Duration::from_secs(1));
 
             let mut buf = [0; 64];
-            if let Ok((amt, _src)) = tokio::time::timeout(Duration::from_secs(timeout), socket.recv_from(&mut buf)).await? {
+            if let Ok((amt, _src)) =
+                tokio::time::timeout(Duration::from_secs(timeout), socket.recv_from(&mut buf))
+                    .await?
+            {
                 Ok(amt != 0)
             } else {
                 Ok(false)
@@ -80,26 +78,24 @@ pub mod teamspeak {
     }
 }
 
-
 pub mod ssh {
 
-    use tokio::time::Duration;
+    use crate::connlib::ServiceChecker;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
-    use crate::connlib::ServiceChecker;
+    use tokio::time::Duration;
 
     const HEAD_DATA: [u8; 21] = hex_literal::hex!("5353482d322e302d4f70656e5353485f382e370d0a");
 
     pub struct SSH {
         remote_address: String,
-
     }
 
     impl SSH {
         pub fn new(remote_address: &str) -> Self {
             Self {
-                remote_address: remote_address.to_string()
+                remote_address: remote_address.to_string(),
             }
         }
     }
@@ -107,35 +103,44 @@ pub mod ssh {
     #[async_trait::async_trait]
     impl ServiceChecker for SSH {
         async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
-            if let Ok(mut socket) = tokio::time::timeout(Duration::from_secs(timeout), TcpStream::connect(&self.remote_address)).await? {
-                if let Ok(_) = tokio::time::timeout(Duration::from_secs(timeout), socket.write_all(&HEAD_DATA)).await? {
+            if let Ok(mut socket) = tokio::time::timeout(
+                Duration::from_secs(timeout),
+                TcpStream::connect(&self.remote_address),
+            )
+            .await?
+            {
+                if let Ok(_) =
+                    tokio::time::timeout(Duration::from_secs(timeout), socket.write_all(&HEAD_DATA))
+                        .await?
+                {
                     let mut buff = [0; 64];
-                    if let Ok(_) = tokio::time::timeout(Duration::from_secs(timeout), socket.read(&mut buff)).await? {
-                        return Ok(String::from_utf8_lossy(&buff).contains("SSH"))
+                    if let Ok(_) =
+                        tokio::time::timeout(Duration::from_secs(timeout), socket.read(&mut buff))
+                            .await?
+                    {
+                        return Ok(String::from_utf8_lossy(&buff).contains("SSH"));
                     }
                 }
             }
             Ok(false)
         }
     }
-
 }
 
 pub mod http {
-    use std::time::Duration;
     use crate::connlib::ServiceChecker;
-    use reqwest::ClientBuilder;
     use reqwest::tls::Version;
+    use reqwest::ClientBuilder;
+    use std::time::Duration;
 
     pub struct HTTP {
         remote_address: String,
-
     }
 
     impl HTTP {
         pub fn new(remote_address: &str) -> Self {
             Self {
-                remote_address: remote_address.to_string()
+                remote_address: remote_address.to_string(),
             }
         }
     }
@@ -147,16 +152,13 @@ pub mod http {
                 .timeout(Duration::from_secs(timeout))
                 .min_tls_version(Version::TLS_1_2)
                 .build()?;
-            let req = client.get(&self.remote_address)
-                .send()
-                .await?;
+            let req = client.get(&self.remote_address).send().await?;
             let status = req.status().as_u16();
             Ok((300 > status) && (status >= 200))
         }
     }
 }
 
-
-pub use teamspeak::TeamSpeak;
-pub use ssh::SSH;
 pub use http::HTTP;
+pub use ssh::SSH;
+pub use teamspeak::TeamSpeak;

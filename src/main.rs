@@ -1,8 +1,5 @@
 /*
- ** Copyright (C) 2021 KunoiSayami
- **
- ** This file is part of status-upstream.rs and is released under
- ** the AGPL v3 License: https://www.gnu.org/licenses/agpl-3.0.txt
+ ** Copyright (C) 2021-2022 KunoiSayami
  **
  ** This program is free software: you can redistribute it and/or modify
  ** it under the terms of the GNU Affero General Public License as published by
@@ -17,11 +14,10 @@
  ** You should have received a copy of the GNU Affero General Public License
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+mod configure;
 #[allow(dead_code)]
 mod connlib;
-mod configure;
+mod statuspagelib;
 
 #[tokio::main]
-async fn main(){
-
-}
+async fn main() {}
