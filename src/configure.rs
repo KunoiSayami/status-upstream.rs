@@ -16,7 +16,6 @@
  */
 
 use crate::connlib::{ServiceChecker, ServiceType, TeamSpeak, HTTP, SSH};
-use anyhow::anyhow;
 use log::error;
 use serde_derive::Deserialize;
 use std::convert::TryFrom;
@@ -27,6 +26,7 @@ use std::path::Path;
 pub struct Configure {
     upstream: Upstream,
     services: Services,
+    config: ServerConfig,
 }
 
 impl Configure {
@@ -59,28 +59,34 @@ impl Configure {
     pub fn services(&self) -> &Services {
         &self.services
     }
+    pub fn config(&self) -> &ServerConfig {
+        &self.config
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Upstream {
-    server: String,
-    token: String,
     page: String,
     oauth: String,
 }
 
 impl Upstream {
-    pub fn server(&self) -> &str {
-        &self.server
-    }
-    pub fn token(&self) -> &str {
-        &self.token
-    }
     pub fn page(&self) -> &str {
         &self.page
     }
     pub fn oauth(&self) -> &str {
         &self.oauth
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ServerConfig {
+    interval: Option<u64>,
+}
+
+impl ServerConfig {
+    pub fn interval(&self) -> &Option<u64> {
+        &self.interval
     }
 }
 

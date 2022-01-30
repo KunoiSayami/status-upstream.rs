@@ -1,14 +1,16 @@
 [upstream]
-server = ""
-token = ""
+page = ""
+oauth = ""
 
-[servers]
-    [servers.sample1]
-    type = ""
-    address = ""
-    uuid = ""
+[config]
+# interval = 0
 
-    [servers.sample2]
-    type = ""
-    address = ""
-    uuid = ""
+[[servers]]
+type = ""
+address = ""
+identity_id = ""
+
+[[servers]]
+type = ""
+address = ""
+identity_id = ""

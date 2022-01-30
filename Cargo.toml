@@ -6,9 +6,11 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+clap = "3.0"
 env_logger = "0.9"
-hex-literal = "0.3.3"
+hex-literal = "0.3"
 log = { version = "0.4", features = ["max_level_trace", "release_max_level_debug"] }
+log4rs = "1.0"
 reqwest = { version = "0.11", default-features = false, features = ["json", "serde_json", "socks", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1"

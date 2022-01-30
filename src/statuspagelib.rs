@@ -21,11 +21,10 @@ mod v1 {
     use crate::configure::Configure;
     use crate::statuspagelib::UPSTREAM_URL;
     use reqwest::header::{HeaderMap, HeaderValue};
-    use std::fmt::Formatter;
-    use std::os::linux::raw::stat;
-    use std::time::Duration;
     use reqwest::Response;
     use serde_json::json;
+    use std::fmt::Formatter;
+    use std::time::Duration;
 
     pub enum ComponentStatus {
         Operational,
@@ -78,10 +77,10 @@ mod v1 {
         ) -> anyhow::Result<Response> {
             //let status = status.to_string();
             let payload = json!({
-                    "component": {
-                        "status": status.to_string()
-                    }
-                });
+                "component": {
+                    "status": status.to_string()
+                }
+            });
             let client = reqwest::ClientBuilder::new()
                 .default_headers(self.headers.clone())
                 .timeout(Duration::from_secs(10))
