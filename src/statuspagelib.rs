@@ -18,7 +18,7 @@
 const UPSTREAM_URL: &str = "https://api.statuspage.io/";
 
 mod v1 {
-    use crate::configure::Configure;
+    use crate::configure::TomlConfigure;
     use crate::statuspagelib::UPSTREAM_URL;
     use reqwest::header::{HeaderMap, HeaderValue};
     use reqwest::Response;
@@ -57,7 +57,7 @@ mod v1 {
     }
 
     impl Upstream {
-        pub fn from_configure(cfg: &Configure) -> Upstream {
+        pub fn from_configure(cfg: &TomlConfigure) -> Upstream {
             let mut map = HeaderMap::new();
             map.insert(
                 "Authorization",
@@ -104,3 +104,6 @@ mod v1 {
         }
     }
 }
+
+pub use v1::ComponentStatus;
+pub use v1::Upstream;

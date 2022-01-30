@@ -16,21 +16,63 @@
  */
 
 use crate::connlib::{ServiceChecker, ServiceType, TeamSpeak, HTTP, SSH};
-use log::error;
+use crate::statuspagelib::Upstream;
+use anyhow::anyhow;
 use serde_derive::Deserialize;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::path::Path;
 
-#[derive(Deserialize, Debug, Clone)]
 pub struct Configure {
+    services: Vec<BoxService>,
     upstream: Upstream,
+}
+
+impl Configure {
+    pub fn services(&self) -> &Vec<BoxService> {
+        &self.services
+    }
+    pub fn upstream(&self) -> &Upstream {
+        &self.upstream
+    }
+}
+
+impl TryFrom<TomlConfigure> for Configure {
+    type Error = anyhow::Error;
+
+    fn try_from(value: TomlConfigure) -> Result<Self, Self::Error> {
+        let result = value
+            .services
+            .0
+            .into_iter()
+            .map(|ref x| {
+                let service = BoxService::try_from(x);
+                if let Err(ref e) = service {
+                    log::error!(
+                        "Got error while processing transform services: {:?} error: {:?}",
+                        x,
+                        e
+                    );
+                }
+                service.unwrap()
+            })
+            .collect::<Vec<BoxService>>();
+        Ok(Self {
+            services: result,
+            upstream: Upstream::from_configure(&value),
+        })
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct TomlConfigure {
+    upstream: TomlUpstream,
     services: Services,
     config: ServerConfig,
 }
 
-impl Configure {
-    pub async fn init_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Configure> {
+impl TomlConfigure {
+    pub async fn init_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<TomlConfigure> {
         let context = tokio::fs::read_to_string(&path).await;
         if let Err(ref e) = context {
             log::error!(
@@ -53,7 +95,7 @@ impl Configure {
         };
         Ok(cfg)
     }
-    pub fn upstream(&self) -> &Upstream {
+    pub fn upstream(&self) -> &TomlUpstream {
         &self.upstream
     }
     pub fn services(&self) -> &Services {
@@ -65,12 +107,12 @@ impl Configure {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct Upstream {
+pub struct TomlUpstream {
     page: String,
     oauth: String,
 }
 
-impl Upstream {
+impl TomlUpstream {
     pub fn page(&self) -> &str {
         &self.page
     }
@@ -116,11 +158,23 @@ impl Service {
 pub struct BoxService {
     report_uuid: String,
     service_type: ServiceType,
-    inner: Box<dyn ServiceChecker>,
+    inner: Box<dyn ServiceChecker + Send + Sync>,
+}
+
+impl BoxService {
+    pub fn report_uuid(&self) -> &str {
+        &self.report_uuid
+    }
+    pub fn service_type(&self) -> &ServiceType {
+        &self.service_type
+    }
+    pub fn inner(&self) -> &Box<dyn ServiceChecker + Send + Sync> {
+        &self.inner
+    }
 }
 
 impl TryFrom<&Service> for BoxService {
-    type Error = ();
+    type Error = anyhow::Error;
 
     fn try_from(s: &Service) -> Result<Self, Self::Error> {
         let service_type = s.service_type().to_lowercase();
@@ -129,12 +183,11 @@ impl TryFrom<&Service> for BoxService {
             "ssh" => ServiceType::SSH,
             "http" => ServiceType::HTTP,
             &_ => {
-                error!(
+                return Err(anyhow!(
                     "Unexpect service type: {}, report uuid => {}",
                     s.service_type(),
                     s.report_uuid()
-                );
-                return Err(());
+                ));
             }
         };
         let inner: Box<dyn ServiceChecker> = match service_type {

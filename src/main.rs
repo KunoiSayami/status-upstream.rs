@@ -14,7 +14,9 @@
  ** You should have received a copy of the GNU Affero General Public License
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-use crate::configure::Configure;
+use crate::configure::{Configure, TomlConfigure};
+use crate::connlib::ServiceChecker;
+use crate::statuspagelib::ComponentStatus;
 use clap::{arg, App};
 use log4rs::append::file::FileAppender;
 use log4rs::config::Appender;
@@ -28,14 +30,32 @@ mod connlib;
 mod statuspagelib;
 
 async fn main_work(config: Configure) -> anyhow::Result<()> {
-
+    for service in config.services() {
+        let ret = service.inner().ping(5).await;
+        if let Err(ref e) = ret {
+            // TODO: show address
+            log::error!("Got error while ping {}: {:?}", service.report_uuid(), e);
+        }
+        config
+            .upstream()
+            .set_component_status(
+                service.report_uuid(),
+                if ret.unwrap_or(false) {
+                    ComponentStatus::MajorOutage
+                } else {
+                    ComponentStatus::Operational
+                },
+            )
+            .await?;
+    }
     Ok(())
 }
 
 async fn async_main(config_file: Option<&str>) -> anyhow::Result<()> {
     let config_file = config_file.unwrap_or("config/default.toml");
-    let config = Configure::init_from_path(config_file).await?;
+    let config = TomlConfigure::init_from_path(config_file).await?;
     let interval = config.config().interval().unwrap_or(0);
+    let config = Configure::try_from(config)?;
     let main_future = if interval == 0 {
         tokio::spawn(main_work(config.clone()))
     } else {

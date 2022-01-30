@@ -17,7 +17,7 @@
 
 #[async_trait::async_trait]
 pub trait ServiceChecker {
-    async fn check_server(&self, timeout: u64) -> anyhow::Result<bool>;
+    async fn ping(&self, timeout: u64) -> anyhow::Result<bool>;
 }
 
 #[async_trait::async_trait]
@@ -25,11 +25,12 @@ impl<F: ?Sized + Sync + Send> ServiceChecker for Box<F>
 where
     F: ServiceChecker + Sync + Send,
 {
-    async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
-        (**self).check_server(timeout).await
+    async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
+        (**self).ping(timeout).await
     }
 }
 
+#[derive(Copy, Clone)]
 pub enum ServiceType {
     HTTP,
     SSH,
@@ -58,7 +59,7 @@ pub mod teamspeak {
     #[async_trait::async_trait]
     impl ServiceChecker for TeamSpeak {
         // TODO: Support ipv6
-        async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
+        async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
             let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
             socket.send_to(&HEAD_DATA, &self.remote_address).await?;
@@ -102,7 +103,7 @@ pub mod ssh {
 
     #[async_trait::async_trait]
     impl ServiceChecker for SSH {
-        async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
+        async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
             if let Ok(mut socket) = tokio::time::timeout(
                 Duration::from_secs(timeout),
                 TcpStream::connect(&self.remote_address),
@@ -147,7 +148,7 @@ pub mod http {
 
     #[async_trait::async_trait]
     impl ServiceChecker for HTTP {
-        async fn check_server(&self, timeout: u64) -> anyhow::Result<bool> {
+        async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
             let client = ClientBuilder::new()
                 .timeout(Duration::from_secs(timeout))
                 .min_tls_version(Version::TLS_1_2)
