@@ -26,12 +26,23 @@ mod v1 {
     use std::fmt::Formatter;
     use std::time::Duration;
 
+    #[allow(dead_code)]
     pub enum ComponentStatus {
         Operational,
         UnderMaintenance,
         DegradedPerformance,
         PartialOutage,
         MajorOutage,
+    }
+
+    impl From<bool> for ComponentStatus {
+        fn from(b: bool) -> Self {
+            if b {
+                Self::Operational
+            } else {
+                Self::MajorOutage
+            }
+        }
     }
 
     impl std::fmt::Display for ComponentStatus {
@@ -65,7 +76,7 @@ mod v1 {
                     .expect("OAuth Header value parse error"),
             );
             Self {
-                page: "".to_string(),
+                page: cfg.upstream().page().to_string(),
                 headers: map,
             }
         }

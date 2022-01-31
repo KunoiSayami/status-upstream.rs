@@ -15,22 +15,26 @@
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::connlib::{ServiceChecker, ServiceType, TeamSpeak, HTTP, SSH};
+use crate::connlib::ServiceWrapper;
 use crate::statuspagelib::Upstream;
-use anyhow::anyhow;
 use serde_derive::Deserialize;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::path::Path;
 
+#[derive(Clone,Debug)]
 pub struct Configure {
-    services: Vec<BoxService>,
+    services: Vec<ServiceWrapper>,
     upstream: Upstream,
 }
 
 impl Configure {
-    pub fn services(&self) -> &Vec<BoxService> {
+    pub fn services(&self) -> &Vec<ServiceWrapper> {
         &self.services
+    }
+
+    pub fn mut_services(&mut self) -> &mut Vec<ServiceWrapper> {
+        &mut self.services
     }
     pub fn upstream(&self) -> &Upstream {
         &self.upstream
@@ -41,25 +45,26 @@ impl TryFrom<TomlConfigure> for Configure {
     type Error = anyhow::Error;
 
     fn try_from(value: TomlConfigure) -> Result<Self, Self::Error> {
+        let upstream = Upstream::from_configure(&value);
         let result = value
             .services
             .0
             .into_iter()
             .map(|ref x| {
-                let service = BoxService::try_from(x);
+                let service = ServiceWrapper::try_from(x);
                 if let Err(ref e) = service {
                     log::error!(
-                        "Got error while processing transform services: {:?} error: {:?}",
-                        x,
+                        "Got error while processing transform services: {} error: {:?}",
+                        x.remote_address(),
                         e
                     );
                 }
                 service.unwrap()
             })
-            .collect::<Vec<BoxService>>();
+            .collect::<Vec<ServiceWrapper>>();
         Ok(Self {
             services: result,
-            upstream: Upstream::from_configure(&value),
+            upstream,
         })
     }
 }
@@ -152,54 +157,5 @@ impl Service {
     }
     pub fn service_type(&self) -> &str {
         &self.service_type
-    }
-}
-
-pub struct BoxService {
-    report_uuid: String,
-    service_type: ServiceType,
-    inner: Box<dyn ServiceChecker + Send + Sync>,
-}
-
-impl BoxService {
-    pub fn report_uuid(&self) -> &str {
-        &self.report_uuid
-    }
-    pub fn service_type(&self) -> &ServiceType {
-        &self.service_type
-    }
-    pub fn inner(&self) -> &Box<dyn ServiceChecker + Send + Sync> {
-        &self.inner
-    }
-}
-
-impl TryFrom<&Service> for BoxService {
-    type Error = anyhow::Error;
-
-    fn try_from(s: &Service) -> Result<Self, Self::Error> {
-        let service_type = s.service_type().to_lowercase();
-        let service_type = match service_type.as_str() {
-            "teamspeak" | "ts" => ServiceType::TeamSpeak,
-            "ssh" => ServiceType::SSH,
-            "http" => ServiceType::HTTP,
-            &_ => {
-                return Err(anyhow!(
-                    "Unexpect service type: {}, report uuid => {}",
-                    s.service_type(),
-                    s.report_uuid()
-                ));
-            }
-        };
-        let inner: Box<dyn ServiceChecker> = match service_type {
-            ServiceType::HTTP => Box::new(HTTP::new(s.remote_address())),
-            ServiceType::SSH => Box::new(SSH::new(s.remote_address())),
-            ServiceType::TeamSpeak => Box::new(TeamSpeak::new(s.remote_address())),
-        };
-
-        Ok(Self {
-            report_uuid: s.report_uuid().to_string(),
-            service_type,
-            inner,
-        })
     }
 }

@@ -30,7 +30,7 @@ where
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum ServiceType {
     HTTP,
     SSH,
@@ -160,6 +160,102 @@ pub mod http {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum ServerLastStatus {
+    Optional,
+    Outage,
+    Unknown,
+}
+
+impl From<bool> for ServerLastStatus {
+    fn from(b: bool) -> Self {
+        if b {
+            Self::Optional
+        } else {
+            Self::Outage
+        }
+    }
+}
+
+impl PartialEq<bool> for ServerLastStatus {
+    fn eq(&self, other: &bool) -> bool {
+        match self {
+            ServerLastStatus::Optional => *other,
+            _ => !other,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ServiceWrapper {
+    last_status: ServerLastStatus,
+    remote_address: String,
+    report_uuid: String,
+    service_type: ServiceType,
+}
+
+impl ServiceWrapper {
+    pub fn report_uuid(&self) -> &str {
+        &self.report_uuid
+    }
+    pub fn service_type(&self) -> &ServiceType {
+        &self.service_type
+    }
+
+    pub async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
+        match self.service_type() {
+            ServiceType::HTTP => HTTP::new(&self.remote_address).ping(timeout).await,
+            ServiceType::SSH => SSH::new(&self.remote_address).ping(timeout).await,
+            ServiceType::TeamSpeak => TeamSpeak::new(&self.remote_address).ping(timeout).await,
+        }
+    }
+    pub fn last_status(&self) -> &ServerLastStatus {
+        &self.last_status
+    }
+    pub fn remote_address(&self) -> &str {
+        &self.remote_address
+    }
+
+    pub fn update_last_status(&mut self, last_status: bool) -> bool {
+        if self.last_status != last_status {
+            self.last_status = ServerLastStatus::from(last_status);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl TryFrom<&Service> for ServiceWrapper {
+    type Error = anyhow::Error;
+
+    fn try_from(s: &Service) -> Result<Self, Self::Error> {
+        let service_type = s.service_type().to_lowercase();
+        let service_type = match service_type.as_str() {
+            "teamspeak" | "ts" => ServiceType::TeamSpeak,
+            "ssh" => ServiceType::SSH,
+            "http" => ServiceType::HTTP,
+            &_ => {
+                return Err(anyhow!(
+                    "Unexpect service type: {}, report uuid => {}",
+                    s.service_type(),
+                    s.report_uuid()
+                ));
+            }
+        };
+
+        Ok(Self {
+            last_status: ServerLastStatus::Optional,
+            report_uuid: s.report_uuid().to_string(),
+            service_type,
+            remote_address: s.remote_address().to_string(),
+        })
+    }
+}
+
+
+use anyhow::anyhow;
 pub use http::HTTP;
 pub use ssh::SSH;
 pub use teamspeak::TeamSpeak;
+use crate::configure::Service;

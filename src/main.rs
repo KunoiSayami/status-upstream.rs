@@ -14,8 +14,8 @@
  ** You should have received a copy of the GNU Affero General Public License
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+use std::sync::Arc;
 use crate::configure::{Configure, TomlConfigure};
-use crate::connlib::ServiceChecker;
 use crate::statuspagelib::ComponentStatus;
 use clap::{arg, App};
 use log4rs::append::file::FileAppender;
@@ -23,30 +23,33 @@ use log4rs::config::Appender;
 use log4rs::encode::pattern::PatternEncoder;
 use log4rs::Config;
 use std::time::Duration;
+use tokio::sync::Mutex;
+use crate::connlib::ServiceWrapper;
 
 mod configure;
 #[allow(dead_code)]
 mod connlib;
 mod statuspagelib;
 
-async fn main_work(config: Configure) -> anyhow::Result<()> {
-    for service in config.services() {
-        let ret = service.inner().ping(5).await;
+async fn main_work(rw_config: Arc<Mutex<Configure>>) -> anyhow::Result<()> {
+    let mut config = rw_config.lock().await;
+    let upstream = config.upstream().clone();
+    //let mut services: &Vec<ServiceWrapper>  = config.services().as_mut();
+    for service in config.mut_services() {
+        let ret = service.ping(5).await;
         if let Err(ref e) = ret {
             // TODO: show address
-            log::error!("Got error while ping {}: {:?}", service.report_uuid(), e);
+            log::error!("Got error while ping {}: {:?}", service.remote_address(), e);
         }
-        config
-            .upstream()
-            .set_component_status(
-                service.report_uuid(),
-                if ret.unwrap_or(false) {
-                    ComponentStatus::MajorOutage
-                } else {
-                    ComponentStatus::Operational
-                },
-            )
-            .await?;
+        let result = ret.unwrap_or(false);
+        if service.update_last_status(result) {
+            upstream
+                .set_component_status(
+                    service.report_uuid(),
+                    ComponentStatus::from(result)
+                )
+                .await?;
+        }
     }
     Ok(())
 }
@@ -56,6 +59,7 @@ async fn async_main(config_file: Option<&str>) -> anyhow::Result<()> {
     let config = TomlConfigure::init_from_path(config_file).await?;
     let interval = config.config().interval().unwrap_or(0);
     let config = Configure::try_from(config)?;
+    let config = Arc::new(Mutex::new(config));
     let main_future = if interval == 0 {
         tokio::spawn(main_work(config.clone()))
     } else {
