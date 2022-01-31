@@ -18,11 +18,12 @@
 use crate::connlib::ServiceWrapper;
 use crate::statuspagelib::Upstream;
 use serde_derive::Deserialize;
+use spdlog::prelude::*;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::path::Path;
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct Configure {
     services: Vec<ServiceWrapper>,
     upstream: Upstream,
@@ -53,7 +54,7 @@ impl TryFrom<TomlConfigure> for Configure {
             .map(|ref x| {
                 let service = ServiceWrapper::try_from(x);
                 if let Err(ref e) = service {
-                    log::error!(
+                    error!(
                         "Got error while processing transform services: {} error: {:?}",
                         x.remote_address(),
                         e
@@ -80,7 +81,7 @@ impl TomlConfigure {
     pub async fn init_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<TomlConfigure> {
         let context = tokio::fs::read_to_string(&path).await;
         if let Err(ref e) = context {
-            log::error!(
+            error!(
                 "Got error {:?} while reading {:?}",
                 e,
                 &path.as_ref().display()
@@ -90,7 +91,7 @@ impl TomlConfigure {
         let cfg = match toml::from_str(context.as_str()) {
             Ok(cfg) => cfg,
             Err(e) => {
-                log::error!(
+                error!(
                     "Got error {:?} while decode toml {:?}",
                     e,
                     path.as_ref().display()

@@ -14,17 +14,14 @@
  ** You should have received a copy of the GNU Affero General Public License
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-use std::sync::Arc;
 use crate::configure::{Configure, TomlConfigure};
+use crate::connlib::ServiceWrapper;
 use crate::statuspagelib::ComponentStatus;
 use clap::{arg, App};
-use log4rs::append::file::FileAppender;
-use log4rs::config::Appender;
-use log4rs::encode::pattern::PatternEncoder;
-use log4rs::Config;
+use spdlog::{prelude::*, sink::FileSink};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use crate::connlib::ServiceWrapper;
 
 mod configure;
 #[allow(dead_code)]
@@ -39,15 +36,12 @@ async fn main_work(rw_config: Arc<Mutex<Configure>>) -> anyhow::Result<()> {
         let ret = service.ping(5).await;
         if let Err(ref e) = ret {
             // TODO: show address
-            log::error!("Got error while ping {}: {:?}", service.remote_address(), e);
+            error!("Got error while ping {}: {:?}", service.remote_address(), e);
         }
         let result = ret.unwrap_or(false);
         if service.update_last_status(result) {
             upstream
-                .set_component_status(
-                    service.report_uuid(),
-                    ComponentStatus::from(result)
-                )
+                .set_component_status(service.report_uuid(), ComponentStatus::from(result))
                 .await?;
         }
     }
@@ -86,29 +80,28 @@ fn main() -> anyhow::Result<()> {
             arg!(-d --debug ... "turns debug logging"),
         ])
         .get_matches();
-    let log_target = matches.value_of("logfile");
-    if log_target.is_some() {
-        let log_file_requests = FileAppender::builder()
-            .encoder(Box::new(PatternEncoder::new(
-                "{d(%Y-%m-%d %H:%M:%S)}- {h({l})} - {m}{n}",
-            )))
-            .build(log_target.unwrap());
-        if let Err(ref e) = log_file_requests {
+
+    if let Some(log_target) = matches.value_of("logfile") {
+        let file_sink = Arc::new(FileSink::new(log_target, false).unwrap_or_else(|e| {
             eprintln!("Got error while create log file: {:?}", e);
-        }
-        let log_config = Config::builder()
-            .appender(Appender::builder().build("logfile", Box::new(log_file_requests?)))
-            .build(log4rs::config::Root::builder().appender("logfile").build(
-                if matches.is_present("debug") {
-                    log::LevelFilter::Debug
-                } else {
-                    log::LevelFilter::Info
-                },
-            ))
-            .unwrap();
-        log4rs::init_config(log_config)?;
-    } else {
-        env_logger::init();
+            std::process::exit(1);
+        }));
+        // stdout & stderr
+        let default_sinks = spdlog::default_logger().sinks().to_owned();
+        let logger = Arc::new(
+            Logger::builder()
+                .sinks(default_sinks)
+                .sink(file_sink)
+                .build(),
+        );
+        let level_filter = if matches.is_present("debug") {
+            LevelFilter::MoreSevereEqual(Level::Debug)
+        } else {
+            LevelFilter::MoreSevereEqual(Level::Info)
+        };
+        logger.set_level_filter(level_filter);
+
+        spdlog::set_default_logger(logger);
     }
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
