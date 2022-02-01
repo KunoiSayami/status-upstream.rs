@@ -130,11 +130,19 @@ impl TomlUpstream {
 #[derive(Deserialize, Debug, Clone)]
 pub struct ServerConfig {
     interval: Option<u64>,
+    retries_times: Option<u64>,
+    retries_interval: Option<u64>,
 }
 
 impl ServerConfig {
     pub fn interval(&self) -> &Option<u64> {
         &self.interval
+    }
+    pub fn retries_times(&self) -> Option<u64> {
+        self.retries_times
+    }
+    pub fn retries_interval(&self) -> Option<u64> {
+        self.retries_interval
     }
 }
 
