@@ -4,6 +4,8 @@ oauth = ""
 
 [config]
 # interval = 0
+# retries_times = 3
+# retries_interval = 5
 
 [[servers]]
 type = ""

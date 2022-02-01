@@ -30,10 +30,6 @@ pub struct Configure {
 }
 
 impl Configure {
-    pub fn services(&self) -> &Vec<ServiceWrapper> {
-        &self.services
-    }
-
     pub fn mut_services(&mut self) -> &mut Vec<ServiceWrapper> {
         &mut self.services
     }
@@ -103,9 +99,6 @@ impl TomlConfigure {
     }
     pub fn upstream(&self) -> &TomlUpstream {
         &self.upstream
-    }
-    pub fn services(&self) -> &Services {
-        &self.services
     }
     pub fn config(&self) -> &ServerConfig {
         &self.config

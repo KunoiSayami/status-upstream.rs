@@ -15,7 +15,6 @@
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 use crate::configure::{Configure, TomlConfigure};
-use crate::connlib::ServiceWrapper;
 use crate::statuspagelib::ComponentStatus;
 use clap::{arg, App};
 use spdlog::{default_logger, prelude::*, sink::FileSink};
@@ -28,39 +27,20 @@ mod configure;
 mod connlib;
 mod statuspagelib;
 
-async fn main_work(rw_config: Arc<Mutex<Configure>>, retries: u64) -> anyhow::Result<()> {
+async fn main_work(rw_config: Arc<Mutex<Configure>>, retries: u64, retries_interval: u64) -> anyhow::Result<()> {
     let mut config = rw_config.lock().await;
     let upstream = config.upstream().clone();
     //let mut services: &Vec<ServiceWrapper>  = config.services().as_mut();
-    for service in config.mut_services() {
-        let ret = service.ping(5).await;
-        if let Err(ref e) = ret {
-            error!("Got error while ping {}: {:?}", service.remote_address(), e);
-        }
-        let result = ret.unwrap_or(false);
-        if service.update_last_status_condition(result, retries) {
-            upstream
-                .set_component_status(service.report_uuid(), ComponentStatus::from(result))
-                .await?;
-            debug!("Update api to {}", result);
-        }
-    }
-    Ok(())
-}
-
-async fn check_recheck(rw_config: Arc<Mutex<Configure>>, retries: u64, retries_interval: u64) -> anyhow::Result<()> {
-    let mut config = rw_config.lock().await;
-    let upstream = config.upstream().clone();
-    for service in config.mut_services() {
-        if service.ongoing_recheck() {
-            continue
-        }
-        let ret = service.ping(5).await;
-        if let Err(ref e) = ret {
-            error!("Got error while ping {}: {:?}", service.remote_address(), e);
-        }
-        let result = ret.unwrap_or(false);
-        for _ in 0..retries {
+    for times in 0..retries {
+        for service in config.mut_services() {
+            if times > 0 && !service.ongoing_recheck() {
+                continue
+            }
+            let ret = service.ping(5).await;
+            if let Err(ref e) = ret {
+                error!("Got error while ping {}: {:?}", service.remote_address(), e);
+            }
+            let result = ret.unwrap_or(false);
             if service.update_last_status_condition(result, retries) {
                 upstream
                     .set_component_status(service.report_uuid(), ComponentStatus::from(result))
@@ -68,6 +48,10 @@ async fn check_recheck(rw_config: Arc<Mutex<Configure>>, retries: u64, retries_i
                 debug!("Update api to {}", result);
             }
         }
+        tokio::time::sleep(Duration::from_secs(retries_interval)).await;
+    }
+    for service in config.mut_services() {
+        service.reset_count()
     }
     Ok(())
 }
@@ -81,15 +65,11 @@ async fn async_main(config_file: Option<&str>) -> anyhow::Result<()> {
     let config = Configure::try_from(config)?;
     let config = Arc::new(Mutex::new(config));
     let main_future = if interval == 0 {
-        tokio::spawn(async move {
-            main_work(config.clone(), retries).await.unwrap();
-            check_recheck(config.clone(), retries, retries_interval).await.unwrap();
-        })
+        tokio::spawn(main_work(config.clone(), retries, retries_interval))
     } else {
         tokio::spawn(async move {
             loop {
-                main_work(config.clone(), retries).await.unwrap();
-                check_recheck(config.clone(), retries, retries_interval).await.unwrap();
+                main_work(config.clone(), retries,retries_interval).await?;
                 tokio::time::sleep(Duration::from_secs(interval)).await;
             }
         })
@@ -97,7 +77,7 @@ async fn async_main(config_file: Option<&str>) -> anyhow::Result<()> {
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {},
-        ret = main_future => {ret?;}
+        ret = main_future => {ret??;}
     }
     Ok(())
 }

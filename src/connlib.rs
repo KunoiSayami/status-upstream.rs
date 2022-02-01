@@ -38,7 +38,6 @@ pub enum ServiceType {
 }
 
 pub mod teamspeak {
-    use spdlog::debug;
     use crate::connlib::ServiceChecker;
     use tokio::net::UdpSocket;
     use tokio::time::Duration;
@@ -84,7 +83,7 @@ pub mod teamspeak {
 }
 
 pub mod ssh {
-    use spdlog::{debug, error};
+    use spdlog::error;
     use crate::connlib::ServiceChecker;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
@@ -265,6 +264,10 @@ impl ServiceWrapper {
             false
         }
     }
+
+    pub fn reset_count(&mut self) {
+        self.count = 0
+    }
 }
 
 impl TryFrom<&Service> for ServiceWrapper {
@@ -297,7 +300,6 @@ impl TryFrom<&Service> for ServiceWrapper {
 
 
 use anyhow::anyhow;
-use spdlog::debug;
 pub use http::HTTP;
 pub use ssh::SSH;
 pub use teamspeak::TeamSpeak;
