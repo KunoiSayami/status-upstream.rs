@@ -67,8 +67,9 @@ pub mod teamspeak {
             //socket.set_read_timeout(Duration::from_secs(1));
 
             let mut buf = [0; 64];
-            if let Ok(ret) = tokio::time::timeout(Duration::from_secs(timeout), socket.recv_from(&mut buf))
-                .await {
+            if let Ok(ret) =
+                tokio::time::timeout(Duration::from_secs(timeout), socket.recv_from(&mut buf)).await
+            {
                 if let Ok((amt, _src)) = ret {
                     Ok(amt != 0)
                 } else {
@@ -77,14 +78,13 @@ pub mod teamspeak {
             } else {
                 Ok(false)
             }
-
         }
     }
 }
 
 pub mod ssh {
-    use spdlog::error;
     use crate::connlib::ServiceChecker;
+    use spdlog::error;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
@@ -108,16 +108,16 @@ pub mod ssh {
                 Duration::from_secs(timeout),
                 TcpStream::connect(&self.remote_address),
             )
-                .await?
+            .await?
             {
                 if let Ok(_) =
-                tokio::time::timeout(Duration::from_secs(timeout), socket.write_all(&HEAD_DATA))
-                    .await?
+                    tokio::time::timeout(Duration::from_secs(timeout), socket.write_all(&HEAD_DATA))
+                        .await?
                 {
                     let mut buff = [0; 64];
                     if let Ok(_) =
-                    tokio::time::timeout(Duration::from_secs(timeout), socket.read(&mut buff))
-                        .await
+                        tokio::time::timeout(Duration::from_secs(timeout), socket.read(&mut buff))
+                            .await
                     {
                         return Ok(String::from_utf8_lossy(&buff).contains("SSH"));
                     }
@@ -180,6 +180,15 @@ pub enum ServerLastStatus {
     Unknown,
 }
 
+impl From<&ComponentStatus> for ServerLastStatus {
+    fn from(status: &ComponentStatus) -> Self {
+        match status {
+            ComponentStatus::Operational => Self::Optional,
+            _ => Self::Outage,
+        }
+    }
+}
+
 impl From<bool> for ServerLastStatus {
     fn from(b: bool) -> Self {
         if b {
@@ -210,6 +219,17 @@ pub struct ServiceWrapper {
     count: u64,
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct ComponentResponse {
+    status: String,
+}
+
+impl ComponentResponse {
+    pub fn status(&self) -> &str {
+        &self.status
+    }
+}
+
 impl ServiceWrapper {
     pub fn report_uuid(&self) -> &str {
         &self.report_uuid
@@ -236,16 +256,6 @@ impl ServiceWrapper {
         self.count > 0
     }
 
-    #[deprecated(since = "0.2.1")]
-    pub fn update_last_status(&mut self, last_status: bool) -> bool {
-        if self.last_status != last_status {
-            self.last_status = ServerLastStatus::from(last_status);
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn check_last_status_eq(&self, last_status: bool) -> bool {
         self.last_status == last_status
     }
@@ -261,6 +271,7 @@ impl ServiceWrapper {
                 false
             }
         } else {
+            self.count = 0;
             false
         }
     }
@@ -268,12 +279,8 @@ impl ServiceWrapper {
     pub fn reset_count(&mut self) {
         self.count = 0
     }
-}
 
-impl TryFrom<&Service> for ServiceWrapper {
-    type Error = anyhow::Error;
-
-    fn try_from(s: &Service) -> Result<Self, Self::Error> {
+    pub async fn from_service(upstream: &Upstream, s: &Service) -> anyhow::Result<Self> {
         let service_type = s.service_type().to_lowercase();
         let service_type = match service_type.as_str() {
             "teamspeak" | "ts" => ServiceType::TeamSpeak,
@@ -288,19 +295,25 @@ impl TryFrom<&Service> for ServiceWrapper {
             }
         };
 
+        let status = upstream.get_component_status(s.report_uuid()).await?;
+        let status = status.json::<ComponentResponse>().await?;
+
         Ok(Self {
-            last_status: ServerLastStatus::Unknown,
+            last_status: ServerLastStatus::from(&ComponentStatus::from(&status)),
             report_uuid: s.report_uuid().to_string(),
             service_type,
             remote_address: s.remote_address().to_string(),
-            count: 0
+            count: 0,
         })
     }
 }
 
 
+use crate::configure::Service;
+use crate::statuspagelib::Upstream;
 use anyhow::anyhow;
 pub use http::HTTP;
 pub use ssh::SSH;
 pub use teamspeak::TeamSpeak;
-use crate::configure::Service;
+use crate::ComponentStatus;
+use serde_derive::Deserialize;

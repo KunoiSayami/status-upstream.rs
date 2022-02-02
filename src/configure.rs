@@ -19,7 +19,6 @@ use crate::connlib::ServiceWrapper;
 use crate::statuspagelib::Upstream;
 use serde_derive::Deserialize;
 use spdlog::prelude::*;
-use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::path::Path;
 
@@ -36,29 +35,21 @@ impl Configure {
     pub fn upstream(&self) -> &Upstream {
         &self.upstream
     }
-}
 
-impl TryFrom<TomlConfigure> for Configure {
-    type Error = anyhow::Error;
-
-    fn try_from(value: TomlConfigure) -> Result<Self, Self::Error> {
+    pub async fn try_from(value: TomlConfigure) -> anyhow::Result<Self> {
         let upstream = Upstream::from_configure(&value);
-        let result = value
-            .services
-            .0
-            .into_iter()
-            .map(|ref x| {
-                let service = ServiceWrapper::try_from(x);
-                if let Err(ref e) = service {
-                    error!(
+        let mut result = vec![];
+        for service in &value.services.0 {
+            let service_w = ServiceWrapper::from_service(&upstream, service).await;
+            if let Err(ref e) = service_w {
+                error!(
                         "Got error while processing transform services: {} error: {:?}",
-                        x.remote_address(),
+                        service.remote_address(),
                         e
                     );
-                }
-                service.unwrap()
-            })
-            .collect::<Vec<ServiceWrapper>>();
+            }
+            result.push(service_w.unwrap());
+        }
         Ok(Self {
             services: result,
             upstream,

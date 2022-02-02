@@ -19,9 +19,10 @@ const UPSTREAM_URL: &str = "https://api.statuspage.io/";
 
 mod v1 {
     use crate::configure::TomlConfigure;
+    use crate::connlib::ComponentResponse;
     use crate::statuspagelib::UPSTREAM_URL;
     use reqwest::header::{HeaderMap, HeaderValue};
-    use reqwest::Response;
+    use reqwest::{Client, Response};
     use serde_json::json;
     use std::fmt::Formatter;
     use std::time::Duration;
@@ -33,6 +34,19 @@ mod v1 {
         DegradedPerformance,
         PartialOutage,
         MajorOutage,
+    }
+
+    impl From<&ComponentResponse> for ComponentStatus {
+        fn from(s: &ComponentResponse) -> Self {
+            match s.status() {
+                "operational" => ComponentStatus::Operational,
+                "under_maintenance" => ComponentStatus::UnderMaintenance,
+                "degraded_performance" => ComponentStatus::DegradedPerformance,
+                "partial_outage" => ComponentStatus::PartialOutage,
+                "major_outage" => ComponentStatus::MajorOutage,
+                &_ => unreachable!("This code maybe outdated, if you sure this is wrong, please open a issue to report.")
+            }
+        }
     }
 
     impl From<bool> for ComponentStatus {
@@ -63,8 +77,8 @@ mod v1 {
 
     #[derive(Debug, Clone)]
     pub struct Upstream {
+        client: Client,
         page: String,
-        headers: HeaderMap,
     }
 
     impl Upstream {
@@ -76,8 +90,12 @@ mod v1 {
                     .expect("OAuth Header value parse error"),
             );
             Self {
+                client: reqwest::ClientBuilder::new()
+                    .default_headers(map.clone())
+                    .timeout(Duration::from_secs(10))
+                    .build()
+                    .unwrap(),
                 page: cfg.upstream().page().to_string(),
-                headers: map,
             }
         }
 
@@ -92,26 +110,34 @@ mod v1 {
                     "status": status.to_string()
                 }
             });
-            let client = reqwest::ClientBuilder::new()
-                .default_headers(self.headers.clone())
-                .timeout(Duration::from_secs(10))
-                .build()
-                .unwrap();
-            Ok(client
-                .patch(format!(
-                    "{basic_url}v1/pages/{page_id}/components/{component_id}",
-                    basic_url = UPSTREAM_URL,
-                    page_id = &self.page,
-                    component_id = component
-                ))
+            Ok(self
+                .client
+                .patch(self.build_request_url(component))
                 .json(&payload)
                 .send()
                 .await?)
         }
 
+        pub fn build_request_url(&self, component_id: &str) -> String {
+            format!(
+                "{basic_url}v1/pages/{page_id}/components/{component_id}",
+                basic_url = UPSTREAM_URL,
+                page_id = &self.page,
+                component_id = component_id
+            )
+        }
+
         pub async fn reset_component_status(&self, component: &str) -> anyhow::Result<Response> {
             self.set_component_status(component, ComponentStatus::Operational)
                 .await
+        }
+
+        pub async fn get_component_status(&self, component: &str) -> anyhow::Result<Response> {
+            Ok(self
+                .client
+                .get(self.build_request_url(component))
+                .send()
+                .await?)
         }
     }
 }

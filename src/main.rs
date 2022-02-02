@@ -27,14 +27,18 @@ mod configure;
 mod connlib;
 mod statuspagelib;
 
-async fn main_work(rw_config: Arc<Mutex<Configure>>, retries: u64, retries_interval: u64) -> anyhow::Result<()> {
+async fn main_work(
+    rw_config: Arc<Mutex<Configure>>,
+    retries: u64,
+    retries_interval: u64,
+) -> anyhow::Result<()> {
     let mut config = rw_config.lock().await;
     let upstream = config.upstream().clone();
     //let mut services: &Vec<ServiceWrapper>  = config.services().as_mut();
     for times in 0..retries {
         for service in config.mut_services() {
             if times > 0 && !service.ongoing_recheck() {
-                continue
+                continue;
             }
             let ret = service.ping(5).await;
             if let Err(ref e) = ret {
@@ -45,7 +49,7 @@ async fn main_work(rw_config: Arc<Mutex<Configure>>, retries: u64, retries_inter
                 upstream
                     .set_component_status(service.report_uuid(), ComponentStatus::from(result))
                     .await?;
-                debug!("Update api to {}", result);
+                debug!("Update {} status to {}", service.remote_address(), result);
             }
         }
         tokio::time::sleep(Duration::from_secs(retries_interval)).await;
@@ -62,14 +66,14 @@ async fn async_main(config_file: Option<&str>) -> anyhow::Result<()> {
     let interval = config.config().interval().unwrap_or(0);
     let retries = config.config().retries_times().unwrap_or(3);
     let retries_interval = config.config().retries_interval().unwrap_or(5);
-    let config = Configure::try_from(config)?;
+    let config = Configure::try_from(config).await?;
     let config = Arc::new(Mutex::new(config));
     let main_future = if interval == 0 {
         tokio::spawn(main_work(config.clone(), retries, retries_interval))
     } else {
         tokio::spawn(async move {
             loop {
-                main_work(config.clone(), retries,retries_interval).await?;
+                main_work(config.clone(), retries, retries_interval).await?;
                 tokio::time::sleep(Duration::from_secs(interval)).await;
             }
         })
