@@ -180,6 +180,24 @@ pub enum ServerLastStatus {
     Unknown,
 }
 
+impl Into<bool> for &ServerLastStatus {
+    fn into(self) -> bool {
+        match self {
+            ServerLastStatus::Optional => true,
+            _ => false,
+        }
+    }
+}
+
+impl Into<bool> for ServerLastStatus {
+    fn into(self) -> bool {
+        match self {
+            ServerLastStatus::Optional => true,
+            _ => false,
+        }
+    }
+}
+
 impl From<&ComponentStatus> for ServerLastStatus {
     fn from(status: &ComponentStatus) -> Self {
         match status {
@@ -191,7 +209,13 @@ impl From<&ComponentStatus> for ServerLastStatus {
 
 impl From<bool> for ServerLastStatus {
     fn from(b: bool) -> Self {
-        if b {
+        Self::from(&b)
+    }
+}
+
+impl From<&bool> for ServerLastStatus {
+    fn from(b: &bool) -> Self {
+        if *b {
             Self::Optional
         } else {
             Self::Outage
@@ -281,6 +305,15 @@ impl ServiceWrapper {
     }
 
     pub async fn from_service(upstream: &Upstream, s: &Service) -> anyhow::Result<Self> {
+        let status = upstream.get_component_status(s.report_uuid()).await?;
+        let status = status.json::<ComponentResponse>().await?;
+        Self::new_with_last_status(s, ServerLastStatus::from(&ComponentStatus::from(&status)))
+    }
+
+    pub fn new_with_last_status(
+        s: &Service,
+        last_status: ServerLastStatus,
+    ) -> anyhow::Result<Self> {
         let service_type = s.service_type().to_lowercase();
         let service_type = match service_type.as_str() {
             "teamspeak" | "ts" => ServiceType::TeamSpeak,
@@ -294,26 +327,35 @@ impl ServiceWrapper {
                 ));
             }
         };
-
-        let status = upstream.get_component_status(s.report_uuid()).await?;
-        let status = status.json::<ComponentResponse>().await?;
-
-        Ok(Self {
-            last_status: ServerLastStatus::from(&ComponentStatus::from(&status)),
-            report_uuid: s.report_uuid().to_string(),
+        Ok(Self::new(
+            last_status.clone(),
+            s.report_uuid().to_string(),
             service_type,
-            remote_address: s.remote_address().to_string(),
+            s.remote_address().to_string(),
+        ))
+    }
+
+    pub fn new(
+        last_status: ServerLastStatus,
+        identify_id: String,
+        service_type: ServiceType,
+        remote_address: String,
+    ) -> Self {
+        Self {
+            last_status,
+            report_uuid: identify_id,
+            service_type,
+            remote_address,
             count: 0,
-        })
+        }
     }
 }
 
-
 use crate::configure::Service;
 use crate::statuspagelib::Upstream;
+use crate::ComponentStatus;
 use anyhow::anyhow;
 pub use http::HTTP;
+use serde_derive::Deserialize;
 pub use ssh::SSH;
 pub use teamspeak::TeamSpeak;
-use crate::ComponentStatus;
-use serde_derive::Deserialize;

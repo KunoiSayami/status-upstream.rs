@@ -14,18 +14,23 @@
  ** You should have received a copy of the GNU Affero General Public License
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+use crate::cache::{read_cache, CacheData};
 use crate::configure::{Configure, TomlConfigure};
 use crate::statuspagelib::ComponentStatus;
+use anyhow::anyhow;
 use clap::{arg, App};
 use spdlog::{default_logger, prelude::*, sink::FileSink};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+mod cache;
 mod configure;
 #[allow(dead_code)]
 mod connlib;
 mod statuspagelib;
+
+const DEFAULT_CACHE_FILE: &str = "config/cache.json";
 
 async fn main_work(
     rw_config: Arc<Mutex<Configure>>,
@@ -60,14 +65,43 @@ async fn main_work(
     Ok(())
 }
 
-async fn async_main(config_file: Option<&str>) -> anyhow::Result<()> {
+async fn save_cache_file(config: Arc<Mutex<Configure>>, cache_file: &str) -> anyhow::Result<()> {
+    let content = {
+        let config = config.lock().await;
+        CacheData::from_configure(&config)
+    };
+    let content = serde_json::to_string(&content);
+    let content = if let Err(e) = content {
+        return Err(anyhow!("Got error while create cache content: {:?}", e));
+    } else {
+        content.unwrap()
+    };
+    Ok(tokio::fs::write(cache_file, content.as_bytes()).await?)
+}
+
+async fn async_main(config_file: Option<&str>, cache_file: Option<&str>) -> anyhow::Result<()> {
     let config_file = config_file.unwrap_or("config/default.toml");
+    let cache_file = cache_file.unwrap_or(DEFAULT_CACHE_FILE).to_string();
     let config = TomlConfigure::init_from_path(config_file).await?;
     let interval = config.config().interval().unwrap_or(0);
+
     let retries = config.config().retries_times().unwrap_or(3);
     let retries_interval = config.config().retries_interval().unwrap_or(5);
-    let config = Configure::try_from(config).await?;
+
+    let cache = read_cache(&cache_file).await;
+
+    let config = Configure::try_from(
+        config,
+        if cache.is_ok() {
+            Some(cache.unwrap())
+        } else {
+            None
+        },
+    )
+    .await?;
+
     let config = Arc::new(Mutex::new(config));
+    let alt_config = config.clone();
     let main_future = if interval == 0 {
         tokio::spawn(main_work(config.clone(), retries, retries_interval))
     } else {
@@ -79,19 +113,31 @@ async fn async_main(config_file: Option<&str>) -> anyhow::Result<()> {
         })
     };
 
+    let save_cache_task: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        let cache_file = cache_file.to_string();
+        loop {
+            interval.tick().await;
+            save_cache_file(alt_config.clone(), &cache_file).await?;
+        }
+    });
+
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {},
         ret = main_future => {ret??;}
+        ret = save_cache_task => {ret??;}
     }
     Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
     let matches = App::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
         .args(&[
             arg!(--config [FILE] "Specify configure file"),
             arg!(--logfile [LOGFILE] "Specify log file out instead of output to stdout"),
             arg!(-d --debug ... "turns debug logging"),
+            arg!(--cache [CACHEFILE] "Specify cache file location"),
         ])
         .get_matches();
 
@@ -123,6 +169,9 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .build()
         .unwrap()
-        .block_on(async_main(matches.value_of("config").clone()))?;
+        .block_on(async_main(
+            matches.value_of("config").clone(),
+            matches.value_of("cache").clone(),
+        ))?;
     Ok(())
 }

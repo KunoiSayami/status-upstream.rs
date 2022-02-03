@@ -15,10 +15,13 @@
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::connlib::ServiceWrapper;
+use crate::cache::CacheData;
+use crate::connlib::{ServerLastStatus, ServiceWrapper};
 use crate::statuspagelib::Upstream;
+use crate::ComponentStatus;
 use serde_derive::Deserialize;
 use spdlog::prelude::*;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::Path;
 
@@ -32,21 +35,44 @@ impl Configure {
     pub fn mut_services(&mut self) -> &mut Vec<ServiceWrapper> {
         &mut self.services
     }
+
+    pub fn services(&self) -> &Vec<ServiceWrapper> {
+        &self.services
+    }
+
     pub fn upstream(&self) -> &Upstream {
         &self.upstream
     }
 
-    pub async fn try_from(value: TomlConfigure) -> anyhow::Result<Self> {
+    fn convert_cache_vec_to_map(cache: Option<CacheData>) -> HashMap<String, ComponentStatus> {
+        let mut map: HashMap<String, ComponentStatus> = Default::default();
+        if let Some(cache) = cache {
+            for status in cache.data() {
+                map.insert(
+                    status.id().to_string(),
+                    ComponentStatus::from(status.last_status()),
+                );
+            }
+        }
+        map
+    }
+
+    pub async fn try_from(value: TomlConfigure, cache: Option<CacheData>) -> anyhow::Result<Self> {
         let upstream = Upstream::from_configure(&value);
+        let cache_data = Self::convert_cache_vec_to_map(cache);
         let mut result = vec![];
         for service in &value.services.0 {
-            let service_w = ServiceWrapper::from_service(&upstream, service).await;
+            let service_w = if let Some(status) = cache_data.get(service.report_uuid()) {
+                ServiceWrapper::new_with_last_status(service, ServerLastStatus::from(status))
+            } else {
+                ServiceWrapper::from_service(&upstream, service).await
+            };
             if let Err(ref e) = service_w {
                 error!(
-                        "Got error while processing transform services: {} error: {:?}",
-                        service.remote_address(),
-                        e
-                    );
+                    "Got error while processing transform services: {} error: {:?}",
+                    service.remote_address(),
+                    e
+                );
             }
             result.push(service_w.unwrap());
         }
