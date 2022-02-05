@@ -45,11 +45,14 @@ async fn main_work(
             if times > 0 && !service.ongoing_recheck() {
                 continue;
             }
-            let ret = service.ping(5).await;
-            if let Err(ref e) = ret {
-                error!("Got error while ping {}: {:?}", service.remote_address(), e);
-            }
-            let result = ret.unwrap_or(false);
+            let result = match service.ping(5).await {
+                Ok(ret) => ret,
+                Err(e) if e.is::<tokio::time::error::Elapsed>() => false,
+                Err(e) => {
+                    error!("Got error while ping {}: {:?}", service.remote_address(), e);
+                    false
+                }
+            };
             if service.update_last_status_condition(result, retries) {
                 upstream
                     .set_component_status(service.report_uuid(), ComponentStatus::from(result))

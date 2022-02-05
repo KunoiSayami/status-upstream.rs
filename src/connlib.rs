@@ -67,14 +67,11 @@ pub mod teamspeak {
             //socket.set_read_timeout(Duration::from_secs(1));
 
             let mut buf = [0; 64];
-            if let Ok(ret) =
-                tokio::time::timeout(Duration::from_secs(timeout), socket.recv_from(&mut buf)).await
+            if let Ok((amt, _src)) =
+                tokio::time::timeout(Duration::from_secs(timeout), socket.recv_from(&mut buf))
+                    .await?
             {
-                if let Ok((amt, _src)) = ret {
-                    Ok(amt != 0)
-                } else {
-                    Ok(false)
-                }
+                Ok(amt != 0)
             } else {
                 Ok(false)
             }
@@ -84,7 +81,6 @@ pub mod teamspeak {
 
 pub mod ssh {
     use crate::connlib::ServiceChecker;
-    use spdlog::error;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
@@ -102,8 +98,11 @@ pub mod ssh {
                 remote_address: remote_address.to_string(),
             }
         }
+    }
 
-        async fn ping_(&self, timeout: u64) -> anyhow::Result<bool> {
+    #[async_trait::async_trait]
+    impl ServiceChecker for SSH {
+        async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
             if let Ok(mut socket) = tokio::time::timeout(
                 Duration::from_secs(timeout),
                 TcpStream::connect(&self.remote_address),
@@ -124,19 +123,6 @@ pub mod ssh {
                 }
             }
             Ok(false)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ServiceChecker for SSH {
-        async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
-            match self.ping_(timeout).await {
-                Ok(ret) => Ok(ret),
-                Err(e) => {
-                    error!("Got error in ping {} {:?}", &self.remote_address, e);
-                    Ok(false)
-                }
-            }
         }
     }
 }
@@ -166,9 +152,19 @@ pub mod http {
                 .timeout(Duration::from_secs(timeout))
                 .min_tls_version(Version::TLS_1_2)
                 .build()?;
-            let req = client.get(&self.remote_address).send().await?;
-            let status = req.status().as_u16();
-            Ok((300 > status) && (status >= 200))
+            let req = client.get(&self.remote_address).send().await;
+            match req {
+                Ok(req) => {
+                    let status = req.status().as_u16();
+                    Ok((300 > status) && (status >= 200))
+                }
+                Err(e ) if e.is_timeout() => {
+                    Ok(false)
+                }
+                Err(e) => {
+                    Err(anyhow::Error::from(e))
+                }
+            }
         }
     }
 }

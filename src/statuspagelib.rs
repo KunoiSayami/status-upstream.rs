@@ -127,6 +127,7 @@ mod v1 {
             )
         }
 
+        #[deprecated(since = "0.5.0")]
         pub async fn reset_component_status(&self, component: &str) -> anyhow::Result<Response> {
             self.set_component_status(component, ComponentStatus::Operational)
                 .await
