@@ -21,7 +21,7 @@ use crate::statuspagelib::Upstream;
 use crate::ComponentStatus;
 use serde_derive::Deserialize;
 use spdlog::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::Path;
 
@@ -76,6 +76,16 @@ impl Configure {
             }
             result.push(service_w.unwrap());
         }
+
+        // Check duplicate component_id
+        let mut id_checker = HashSet::new();
+        for service in &result {
+            id_checker.insert(service.report_uuid());
+        }
+        if id_checker.len() != result.len() {
+            warn!("Duplicate component_id detected");
+        }
+
         Ok(Self {
             services: result,
             upstream,
