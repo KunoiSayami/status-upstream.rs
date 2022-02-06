@@ -158,12 +158,8 @@ pub mod http {
                     let status = req.status().as_u16();
                     Ok((300 > status) && (status >= 200))
                 }
-                Err(e ) if e.is_timeout() => {
-                    Ok(false)
-                }
-                Err(e) => {
-                    Err(anyhow::Error::from(e))
-                }
+                Err(e) if e.is_timeout() => Ok(false),
+                Err(e) => Err(anyhow::Error::from(e)),
             }
         }
     }

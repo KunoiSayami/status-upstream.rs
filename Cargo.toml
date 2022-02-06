@@ -1,6 +1,6 @@
 [package]
 name = "status-upstream"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 
 [dependencies]
@@ -12,6 +12,11 @@ reqwest = { version = "0.11", default-features = false, features = ["json", "ser
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
-spdlog-rs = { version = "0.2", features = ["level-trace", "release-level-debug"] }
+spdlog-rs = { version = "0.2", features = ["level-trace", "release-level-debug", "log"] }
 tokio = { version = "1", features = ["full"] }
 toml = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"

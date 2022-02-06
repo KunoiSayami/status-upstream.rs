@@ -19,7 +19,7 @@ use crate::configure::{Configure, TomlConfigure};
 use crate::statuspagelib::ComponentStatus;
 use anyhow::anyhow;
 use clap::{arg, App};
-use spdlog::{default_logger, prelude::*, sink::FileSink};
+use spdlog::{default_logger, init_log_crate_proxy, prelude::*, sink::FileSink};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -86,6 +86,12 @@ async fn async_main(config_file: Option<&str>, cache_file: Option<&str>) -> anyh
     let config_file = config_file.unwrap_or("config/default.toml");
     let cache_file = cache_file.unwrap_or(DEFAULT_CACHE_FILE).to_string();
     let config = TomlConfigure::init_from_path(config_file).await?;
+
+    if config.is_empty_services() {
+        info!("Services list is empty, exit!");
+        return Ok(());
+    }
+
     let interval = config.config().interval().unwrap_or(0);
 
     let retries = config.config().retries_times().unwrap_or(3);
@@ -144,6 +150,7 @@ fn main() -> anyhow::Result<()> {
         ])
         .get_matches();
 
+    init_log_crate_proxy().unwrap();
     if let Some(log_target) = matches.value_of("logfile") {
         let file_sink = Arc::new(FileSink::new(log_target, false).unwrap_or_else(|e| {
             eprintln!("Got error while create log file: {:?}", e);
@@ -166,8 +173,10 @@ fn main() -> anyhow::Result<()> {
 
         spdlog::set_default_logger(logger);
     } else {
-        default_logger().set_level_filter(LevelFilter::Equal(Level::Debug));
+        default_logger().set_level_filter(LevelFilter::MoreSevereEqual(Level::Debug));
+        info!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     }
+
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

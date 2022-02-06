@@ -120,6 +120,10 @@ impl TomlConfigure {
     pub fn config(&self) -> &ServerConfig {
         &self.config
     }
+
+    pub fn is_empty_services(&self) -> bool {
+        self.services.0.is_empty()
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
