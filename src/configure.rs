@@ -20,7 +20,10 @@ use crate::connlib::{ServerLastStatus, ServiceWrapper};
 use crate::statuspagelib::Upstream;
 use crate::ComponentStatus;
 use serde_derive::Deserialize;
+#[cfg(feature = "spdlog-rs")]
 use spdlog::prelude::*;
+#[cfg(any(feature = "env_logger", feature = "log4rs"))]
+use log::{error, warn};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::Path;

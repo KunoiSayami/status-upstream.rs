@@ -14,11 +14,18 @@
  ** You should have received a copy of the GNU Affero General Public License
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+
+#[cfg(all(feature = "spdlog-rs", any(feature = "env_logger", feature = "log4rs")))]
+compile_error!("You should choose only one log feature");
+
 use crate::cache::{read_cache, CacheData};
 use crate::configure::{Configure, TomlConfigure};
 use crate::statuspagelib::ComponentStatus;
 use anyhow::anyhow;
 use clap::{arg, App};
+#[cfg(any(feature = "env_logger", feature = "log4rs"))]
+use log::{debug, error, info};
+#[cfg(feature = "spdlog-rs")]
 use spdlog::{default_logger, init_log_crate_proxy, prelude::*, sink::FileSink};
 use std::sync::Arc;
 use std::time::Duration;
@@ -139,6 +146,55 @@ async fn async_main(config_file: Option<&str>, cache_file: Option<&str>) -> anyh
     Ok(())
 }
 
+#[cfg(feature = "spdlog-rs")]
+fn init_spdlog_file(log_target: &str) {
+    let file_sink = Arc::new(FileSink::new(log_target, false).unwrap_or_else(|e| {
+        eprintln!("Got error while create log file: {:?}", e);
+        std::process::exit(1);
+    }));
+    // stdout & stderr
+    let default_sinks = spdlog::default_logger().sinks().to_owned();
+    let logger = Arc::new(
+        Logger::builder()
+            .sinks(default_sinks)
+            .sink(file_sink)
+            .build(),
+    );
+    let level_filter = if matches.is_present("debug") {
+        LevelFilter::MoreSevereEqual(Level::Debug)
+    } else {
+        LevelFilter::MoreSevereEqual(Level::Info)
+    };
+    logger.set_level_filter(level_filter);
+
+    spdlog::set_default_logger(logger);
+}
+
+#[cfg(feature = "log4rs")]
+fn init_log4rs(log_target: &str, debug: bool) -> anyhow::Result<()> {
+
+    let log_file_requests = log4rs::append::file::FileAppender::builder()
+        .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(
+            "{d(%Y-%m-%d %H:%M:%S)}- {h({l})} - {m}{n}",
+        )))
+        .build(log_target);
+    if let Err(ref e) = log_file_requests {
+        eprintln!("Got error while create log file: {:?}", e);
+    }
+    let log_config = log4rs::Config::builder()
+        .appender(log4rs::config::Appender::builder().build("logfile", Box::new(log_file_requests?)))
+        .build(log4rs::config::Root::builder().appender("logfile").build(
+            if debug {
+                log::LevelFilter::Debug
+            } else {
+                log::LevelFilter::Info
+            },
+        ))
+        .unwrap();
+    log4rs::init_config(log_config)?;
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let matches = App::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
@@ -150,30 +206,17 @@ fn main() -> anyhow::Result<()> {
         ])
         .get_matches();
 
+    #[cfg(feature = "spdlog-rs")]
     init_log_crate_proxy().expect("Init log crate got error");
     if let Some(log_target) = matches.value_of("logfile") {
-        let file_sink = Arc::new(FileSink::new(log_target, false).unwrap_or_else(|e| {
-            eprintln!("Got error while create log file: {:?}", e);
-            std::process::exit(1);
-        }));
-        // stdout & stderr
-        let default_sinks = spdlog::default_logger().sinks().to_owned();
-        let logger = Arc::new(
-            Logger::builder()
-                .sinks(default_sinks)
-                .sink(file_sink)
-                .build(),
-        );
-        let level_filter = if matches.is_present("debug") {
-            LevelFilter::MoreSevereEqual(Level::Debug)
-        } else {
-            LevelFilter::MoreSevereEqual(Level::Info)
-        };
-        logger.set_level_filter(level_filter);
-
-        spdlog::set_default_logger(logger);
+        #[cfg(feature = "spdlog-rs")]
+        init_spdlog_file(log_target);
+        init_log4rs(log_target,matches.is_present("debug"))?;
     } else {
+        #[cfg(feature = "spdlog-rs")]
         default_logger().set_level_filter(LevelFilter::MoreSevereEqual(Level::Debug));
+        #[cfg(feature = "env_logger")]
+        env_logger::Builder::from_default_env().init();
         info!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     }
 
