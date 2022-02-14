@@ -35,6 +35,7 @@ pub enum ServiceType {
     HTTP,
     SSH,
     TeamSpeak,
+    Tcping,
 }
 
 pub mod teamspeak {
@@ -165,6 +166,67 @@ pub mod http {
     }
 }
 
+pub mod tcping {
+    use crate::connlib::ServiceChecker;
+    use std::io::ErrorKind;
+    use std::time::Duration;
+    use tokio::net::TcpStream;
+
+    pub struct Tcping {
+        remote_address: String,
+    }
+
+    impl Tcping {
+        pub fn new(remote_address: &str) -> Self {
+            Self {
+                remote_address: remote_address.to_string(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ServiceChecker for Tcping {
+        async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
+            match tokio::time::timeout(
+                Duration::from_secs(timeout),
+                TcpStream::connect(&self.remote_address),
+            )
+            .await?
+            {
+                Ok(_) => Ok(true),
+                Err(e)
+                if e.kind().eq(&ErrorKind::ConnectionRefused) |
+                    e.kind().eq(&ErrorKind::ConnectionReset) |
+                    e.kind().eq(&ErrorKind::ConnectionAborted) => Ok(false),
+                Err(e) => Err(anyhow::Error::from(e)),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tcping_test {
+        use std::time::Duration;
+        use crate::connlib::ServiceChecker;
+        use crate::connlib::tcping::Tcping;
+
+        #[test]
+        #[ignore]
+        fn test() {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let remote = Tcping::new("localhost:22");
+                    let result = remote.ping(5).await;
+                    println!("{:?}", result);
+                    tokio::time::sleep(Duration::from_secs(20)).await;
+                });
+        }
+
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ServerLastStatus {
     Optional,
@@ -259,6 +321,7 @@ impl ServiceWrapper {
             ServiceType::HTTP => HTTP::new(&self.remote_address).ping(timeout).await,
             ServiceType::SSH => SSH::new(&self.remote_address).ping(timeout).await,
             ServiceType::TeamSpeak => TeamSpeak::new(&self.remote_address).ping(timeout).await,
+            ServiceType::Tcping => Tcping::new(&self.remote_address).ping(timeout).await,
         }
     }
     pub fn last_status(&self) -> &ServerLastStatus {
@@ -311,6 +374,7 @@ impl ServiceWrapper {
             "teamspeak" | "ts" => ServiceType::TeamSpeak,
             "ssh" => ServiceType::SSH,
             "http" => ServiceType::HTTP,
+            "tcping" => ServiceType::Tcping,
             &_ => {
                 return Err(anyhow!(
                     "Unexpect service type: {}, identify id => {}",
@@ -351,3 +415,4 @@ pub use http::HTTP;
 use serde_derive::Deserialize;
 pub use ssh::SSH;
 pub use teamspeak::TeamSpeak;
+use crate::connlib::tcping::Tcping;

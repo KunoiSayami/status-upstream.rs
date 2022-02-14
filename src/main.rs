@@ -150,7 +150,7 @@ fn main() -> anyhow::Result<()> {
         ])
         .get_matches();
 
-    init_log_crate_proxy().unwrap();
+    init_log_crate_proxy().expect("Init log crate got error");
     if let Some(log_target) = matches.value_of("logfile") {
         let file_sink = Arc::new(FileSink::new(log_target, false).unwrap_or_else(|e| {
             eprintln!("Got error while create log file: {:?}", e);
