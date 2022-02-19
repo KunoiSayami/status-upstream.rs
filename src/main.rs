@@ -22,7 +22,7 @@ use crate::cache::{read_cache, CacheData};
 use crate::configure::{Configure, TomlConfigure};
 use crate::statuspagelib::ComponentStatus;
 use anyhow::anyhow;
-use clap::{arg, App};
+use clap::{arg, Command};
 #[cfg(any(feature = "env_logger", feature = "log4rs"))]
 use log::{debug, error, info};
 #[cfg(feature = "spdlog-rs")]
@@ -47,7 +47,7 @@ async fn main_work(
     let mut config = rw_config.lock().await;
     let upstream = config.upstream().clone();
     //let mut services: &Vec<ServiceWrapper>  = config.services().as_mut();
-    for times in 0..retries {
+    for times in 0..(retries+1) {
         for service in config.mut_services() {
             if times > 0 && !service.ongoing_recheck() {
                 continue;
@@ -60,6 +60,7 @@ async fn main_work(
                     false
                 }
             };
+            debug!("Pinging {} {} {}", service.remote_address(), result);
             if service.update_last_status_condition(result, retries) {
                 upstream
                     .set_component_status(service.report_uuid(), ComponentStatus::from(result))
@@ -196,7 +197,7 @@ fn init_log4rs(log_target: &str, debug: bool) -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    let matches = App::new(env!("CARGO_PKG_NAME"))
+    let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .args(&[
             arg!(--config [FILE] "Specify configure file"),

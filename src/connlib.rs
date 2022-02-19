@@ -339,6 +339,10 @@ impl ServiceWrapper {
         self.last_status == last_status
     }
 
+    /*pub fn get_current_count(&self) -> u64 {
+        self.count
+    }*/
+
     pub fn update_last_status_condition(&mut self, last_status: bool, condition: u64) -> bool {
         if self.last_status != last_status {
             if self.count >= condition {
