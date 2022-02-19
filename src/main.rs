@@ -47,7 +47,7 @@ async fn main_work(
     let mut config = rw_config.lock().await;
     let upstream = config.upstream().clone();
     //let mut services: &Vec<ServiceWrapper>  = config.services().as_mut();
-    for times in 0..(retries+1) {
+    for times in 0..retries {
         for service in config.mut_services() {
             if times > 0 && !service.ongoing_recheck() {
                 continue;
@@ -60,8 +60,8 @@ async fn main_work(
                     false
                 }
             };
-            debug!("Pinging {} {} {}", service.remote_address(), result);
-            if service.update_last_status_condition(result, retries) {
+            //debug!("Pinging {} {}", service.remote_address(), result);
+            if service.update_last_status_condition(result, retries - 1) {
                 upstream
                     .set_component_status(service.report_uuid(), ComponentStatus::from(result))
                     .await?;
