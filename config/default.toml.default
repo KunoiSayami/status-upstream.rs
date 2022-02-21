@@ -12,7 +12,6 @@ identity_id = ""
 page = ""
 
 [[servers]]
-type = ""
 addresses = "example.com:19198|tcping"
 identity_id = ""
 page = ""
