@@ -29,7 +29,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release
+          args: --profile release-lto
       #- name: Running test
       #  uses: actions-rs/cargo@v1
       #  with:
@@ -41,20 +41,20 @@ jobs:
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
             BIN='status-upstream_linux_amd64'
-            mv target/release/status-upstream target/release/$BIN
+            mv target/release-lto/status-upstream target/release-lto/$BIN
           elif [ "$RUNNER_OS" == "macOS" ]; then
             BIN='status-upstream_darwin_amd64'
-            mv target/release/status-upstream target/release/$BIN
+            mv target/release-lto/status-upstream target/release-lto/$BIN
           else
             BIN='status-upstream_windows_amd64.exe'
-            mv target/release/status-upstream.exe target/release/$BIN
+            mv target/release-lto/status-upstream.exe target/release-lto/$BIN
           fi
-          echo "::set-output name=bin::target/release/$BIN"
+          echo "::set-output name=bin::target/release-lto/$BIN"
       - uses: actions/upload-artifact@v2
         with:
           name: artifact
           path: |
-            target/release/status-upstream_*
+            target/release-lto/status-upstream_*
       - name: Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')

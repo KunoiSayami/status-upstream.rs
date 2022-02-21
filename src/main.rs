@@ -39,6 +39,8 @@ mod connlib;
 mod statuspagelib;
 
 const DEFAULT_CACHE_FILE: &str = "config/cache.json";
+const DEFAULT_CACHE_WRITE_INTERVAL: u64 = 300;
+const DEFAULT_PING_TIMEOUT: u64 = 5;
 
 async fn main_work(
     rw_config: Arc<Mutex<Configure>>,
@@ -53,18 +55,18 @@ async fn main_work(
             if times > 0 && !service.ongoing_recheck() {
                 continue;
             }
-            //debug!("Pinging {} {}", service.remote_address(), result);
-            let result = service.ping(5).await;
+            let result = service.ping(DEFAULT_PING_TIMEOUT).await;
             let result = ServerLastStatus::from(result);
+            debug!("Pinging {} {}", service.remote_address(), result);
             if service.update_last_status_condition(result, retries - 1) {
                 upstream
                     .set_component_status(
                         service.report_uuid(),
                         service.page(),
-                        service.last_status().into(),
+                        ComponentStatus::from(service.last_status()),
                     )
                     .await?;
-                debug!("Update {} status to {}", service.remote_address(), result);
+                info!("Update {} status to {}", service.remote_address(), result);
             }
         }
         tokio::time::sleep(Duration::from_secs(retries_interval)).await;
@@ -130,7 +132,7 @@ async fn async_main(config_file: Option<&str>, cache_file: Option<&str>) -> anyh
     };
 
     let save_cache_task: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        let mut interval = tokio::time::interval(Duration::from_secs(DEFAULT_CACHE_WRITE_INTERVAL));
         let cache_file = cache_file.to_string();
         loop {
             interval.tick().await;
@@ -219,7 +221,9 @@ fn main() -> anyhow::Result<()> {
         #[cfg(feature = "spdlog-rs")]
         default_logger().set_level_filter(LevelFilter::MoreSevereEqual(Level::Debug));
         #[cfg(feature = "env_logger")]
-        env_logger::Builder::from_default_env().init();
+        env_logger::Builder::from_default_env()
+            .filter_module("rustls", log::LevelFilter::Warn)
+            .init();
         info!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     }
 

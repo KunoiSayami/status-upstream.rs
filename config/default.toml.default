@@ -13,6 +13,6 @@ page = ""
 
 [[servers]]
 type = ""
-address = "example.com:19198|tcping"
+addresses = "example.com:19198|tcping"
 identity_id = ""
 page = ""

@@ -21,16 +21,16 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --target aarch64-unknown-linux-musl --release
-      - run: mv target/aarch64-unknown-linux-musl/release/status-upstream target/aarch64-unknown-linux-musl/release/status-upstream_linux_aarch64
+          args: --target aarch64-unknown-linux-musl --profile release-lto
+      - run: mv target/aarch64-unknown-linux-musl/release-lto/status-upstream target/aarch64-unknown-linux-musl/release-lto/status-upstream_linux_aarch64
       - uses: actions/upload-artifact@v2
         with:
           name: aarch64-artifact
-          path: target/aarch64-unknown-linux-musl/release/status-upstream_linux_aarch64
+          path: target/aarch64-unknown-linux-musl/release-lto/status-upstream_linux_aarch64
       - name: Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: target/aarch64-unknown-linux-musl/release/status-upstream_linux_aarch64
+          files: target/aarch64-unknown-linux-musl/release-lto/status-upstream_linux_aarch64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

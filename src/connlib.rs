@@ -310,18 +310,6 @@ pub mod server_last_status {
         }
     }
 
-    impl Into<ComponentStatus> for ServerLastStatus {
-        fn into(self) -> ComponentStatus {
-            match self {
-                ServerLastStatus::Optional => ComponentStatus::Operational,
-                ServerLastStatus::Outage => ComponentStatus::MajorOutage,
-                ServerLastStatus::DegradedPerformance => ComponentStatus::DegradedPerformance,
-                ServerLastStatus::PartialOutage => ComponentStatus::PartialOutage,
-                ServerLastStatus::Unknown => unreachable!(),
-            }
-        }
-    }
-
     /*impl Into<ComponentResponse> for ServerLastStatus {
         fn into(self) -> ComponentResponse {
 

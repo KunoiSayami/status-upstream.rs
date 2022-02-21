@@ -90,7 +90,13 @@ mod v1 {
 
     impl From<&ServerLastStatus> for ComponentStatus {
         fn from(status: &ServerLastStatus) -> Self {
-            status.into()
+            match status {
+                ServerLastStatus::Optional => ComponentStatus::Operational,
+                ServerLastStatus::Outage => ComponentStatus::MajorOutage,
+                ServerLastStatus::DegradedPerformance => ComponentStatus::DegradedPerformance,
+                ServerLastStatus::PartialOutage => ComponentStatus::PartialOutage,
+                ServerLastStatus::Unknown => unreachable!(),
+            }
         }
     }
 
