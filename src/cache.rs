@@ -104,11 +104,11 @@ impl PreReadCacheData {
 pub struct CacheData {
     version: VersionType,
     timestamp: u64,
-    data: Vec<ComponentStatus>,
+    data: Vec<ComponentCache>,
 }
 
 impl CacheData {
-    pub fn data(&self) -> &Vec<ComponentStatus> {
+    pub fn data(&self) -> &Vec<ComponentCache> {
         &self.data
     }
     /*pub fn version(&self) -> VersionType {
@@ -123,8 +123,8 @@ impl CacheData {
             .services()
             .clone()
             .into_iter()
-            .map(|x| ComponentStatus::from_service(&x))
-            .collect::<Vec<ComponentStatus>>();
+            .map(|x| ComponentCache::from(&x))
+            .collect::<Vec<ComponentCache>>();
         Self {
             version: CURRENT_VERSION,
             timestamp: get_current_timestamp(),
@@ -133,41 +133,44 @@ impl CacheData {
     }
 }
 
-mod v1 {
+mod v2 {
     use super::{Deserialize, VersionType};
     use crate::connlib::ServiceWrapper;
     use serde_derive::Serialize;
 
-    pub const VERSION: VersionType = 1;
+    pub const VERSION: VersionType = 2;
 
     #[derive(Deserialize, Serialize, Debug, Clone)]
-    pub struct ComponentStatus {
+    pub struct ComponentCache {
         id: String,
-        last_status: bool,
+        last_status: String,
     }
 
-    impl ComponentStatus {
+    impl ComponentCache {
         pub fn id(&self) -> &str {
             &self.id
         }
-        pub fn last_status(&self) -> bool {
-            self.last_status
+        pub fn last_status(&self) -> &str {
+            &self.last_status
         }
-        pub fn from_service(s: &ServiceWrapper) -> Self {
+    }
+
+    impl From<&ServiceWrapper> for ComponentCache {
+        fn from(service: &ServiceWrapper) -> Self {
             Self {
-                id: s.report_uuid().to_string(),
-                last_status: s.last_status().into(),
+                id: service.report_uuid().to_string(),
+                last_status: service.last_status().to_string(),
             }
         }
     }
 }
 
 use crate::Configure;
-pub use current::ComponentStatus;
+pub use current::ComponentCache;
 pub use current::VERSION as CURRENT_VERSION;
 pub use errors::OutdatedError;
 pub use errors::VersionNotMatchError;
-use v1 as current;
+use v2 as current;
 
 pub async fn read_cache(path: &str) -> anyhow::Result<CacheData> {
     let content = tokio::fs::read_to_string(&path).await?;

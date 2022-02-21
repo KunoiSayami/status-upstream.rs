@@ -1,5 +1,4 @@
 [upstream]
-page = ""
 oauth = ""
 
 [config]
@@ -8,11 +7,12 @@ oauth = ""
 # retries_interval = 5
 
 [[servers]]
-type = ""
-address = ""
+addresses = ["example.com:11451|ssh", "example.moe:22|teamspeak"]
 identity_id = ""
+page = ""
 
 [[servers]]
 type = ""
-address = ""
+address = "example.com:19198|tcping"
 identity_id = ""
+page = ""

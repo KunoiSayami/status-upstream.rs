@@ -20,11 +20,12 @@ compile_error!("You should choose only one log feature");
 
 use crate::cache::{read_cache, CacheData};
 use crate::configure::{Configure, TomlConfigure};
+use crate::connlib::ServerLastStatus;
 use crate::statuspagelib::ComponentStatus;
 use anyhow::anyhow;
 use clap::{arg, Command};
 #[cfg(any(feature = "env_logger", feature = "log4rs"))]
-use log::{debug, error, info};
+use log::{debug, info};
 #[cfg(feature = "spdlog-rs")]
 use spdlog::{default_logger, init_log_crate_proxy, prelude::*, sink::FileSink};
 use std::sync::Arc;
@@ -52,18 +53,16 @@ async fn main_work(
             if times > 0 && !service.ongoing_recheck() {
                 continue;
             }
-            let result = match service.ping(5).await {
-                Ok(ret) => ret,
-                Err(e) if e.is::<tokio::time::error::Elapsed>() => false,
-                Err(e) => {
-                    error!("Got error while ping {}: {:?}", service.remote_address(), e);
-                    false
-                }
-            };
             //debug!("Pinging {} {}", service.remote_address(), result);
+            let result = service.ping(5).await;
+            let result = ServerLastStatus::from(result);
             if service.update_last_status_condition(result, retries - 1) {
                 upstream
-                    .set_component_status(service.report_uuid(), ComponentStatus::from(result))
+                    .set_component_status(
+                        service.report_uuid(),
+                        service.page(),
+                        service.last_status().into(),
+                    )
                     .await?;
                 debug!("Update {} status to {}", service.remote_address(), result);
             }
@@ -173,7 +172,6 @@ fn init_spdlog_file(log_target: &str) {
 
 #[cfg(feature = "log4rs")]
 fn init_log4rs(log_target: &str, debug: bool) -> anyhow::Result<()> {
-
     let log_file_requests = log4rs::append::file::FileAppender::builder()
         .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(
             "{d(%Y-%m-%d %H:%M:%S)}- {h({l})} - {m}{n}",
@@ -183,14 +181,18 @@ fn init_log4rs(log_target: &str, debug: bool) -> anyhow::Result<()> {
         eprintln!("Got error while create log file: {:?}", e);
     }
     let log_config = log4rs::Config::builder()
-        .appender(log4rs::config::Appender::builder().build("logfile", Box::new(log_file_requests?)))
-        .build(log4rs::config::Root::builder().appender("logfile").build(
-            if debug {
-                log::LevelFilter::Debug
-            } else {
-                log::LevelFilter::Info
-            },
-        ))
+        .appender(
+            log4rs::config::Appender::builder().build("logfile", Box::new(log_file_requests?)),
+        )
+        .build(
+            log4rs::config::Root::builder()
+                .appender("logfile")
+                .build(if debug {
+                    log::LevelFilter::Debug
+                } else {
+                    log::LevelFilter::Info
+                }),
+        )
         .unwrap();
     log4rs::init_config(log_config)?;
     Ok(())
@@ -212,7 +214,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(log_target) = matches.value_of("logfile") {
         #[cfg(feature = "spdlog-rs")]
         init_spdlog_file(log_target);
-        init_log4rs(log_target,matches.is_present("debug"))?;
+        init_log4rs(log_target, matches.is_present("debug"))?;
     } else {
         #[cfg(feature = "spdlog-rs")]
         default_logger().set_level_filter(LevelFilter::MoreSevereEqual(Level::Debug));

@@ -21,6 +21,8 @@ mod v1 {
     use crate::configure::TomlConfigure;
     use crate::connlib::ComponentResponse;
     use crate::statuspagelib::UPSTREAM_URL;
+    use crate::ServerLastStatus;
+    use anyhow::anyhow;
     use reqwest::header::{HeaderMap, HeaderValue};
     use reqwest::{Client, Response};
     use serde_json::json;
@@ -38,14 +40,25 @@ mod v1 {
 
     impl From<&ComponentResponse> for ComponentStatus {
         fn from(s: &ComponentResponse) -> Self {
-            match s.status() {
+            match Self::try_from(s.status()) {
+                Ok(s) => s,
+                Err(_) => unreachable!("This code maybe outdated, if you sure this is wrong, please open a issue to report."),
+            }
+        }
+    }
+
+    impl TryFrom<&str> for ComponentStatus {
+        type Error = anyhow::Error;
+
+        fn try_from(value: &str) -> Result<Self, Self::Error> {
+            Ok(match value {
                 "operational" => ComponentStatus::Operational,
                 "under_maintenance" => ComponentStatus::UnderMaintenance,
                 "degraded_performance" => ComponentStatus::DegradedPerformance,
                 "partial_outage" => ComponentStatus::PartialOutage,
                 "major_outage" => ComponentStatus::MajorOutage,
-                &_ => unreachable!("This code maybe outdated, if you sure this is wrong, please open a issue to report.")
-            }
+                &_ => return Err(anyhow!("unexpected value: {}", value)),
+            })
         }
     }
 
@@ -75,10 +88,15 @@ mod v1 {
         }
     }
 
+    impl From<&ServerLastStatus> for ComponentStatus {
+        fn from(status: &ServerLastStatus) -> Self {
+            status.into()
+        }
+    }
+
     #[derive(Debug, Clone)]
     pub struct Upstream {
         client: Client,
-        page: String,
     }
 
     impl Upstream {
@@ -95,13 +113,13 @@ mod v1 {
                     .timeout(Duration::from_secs(10))
                     .build()
                     .unwrap(),
-                page: cfg.upstream().page().to_string(),
             }
         }
 
         pub async fn set_component_status(
             &self,
             component: &str,
+            page: &str,
             status: ComponentStatus,
         ) -> anyhow::Result<Response> {
             //let status = status.to_string();
@@ -112,31 +130,29 @@ mod v1 {
             });
             Ok(self
                 .client
-                .patch(self.build_request_url(component))
+                .patch(self.build_request_url(component, page))
                 .json(&payload)
                 .send()
                 .await?)
         }
 
-        pub fn build_request_url(&self, component_id: &str) -> String {
+        pub fn build_request_url(&self, component_id: &str, page: &str) -> String {
             format!(
                 "{basic_url}v1/pages/{page_id}/components/{component_id}",
                 basic_url = UPSTREAM_URL,
-                page_id = &self.page,
+                page_id = page,
                 component_id = component_id
             )
         }
 
-        #[deprecated(since = "0.5.0")]
-        pub async fn reset_component_status(&self, component: &str) -> anyhow::Result<Response> {
-            self.set_component_status(component, ComponentStatus::Operational)
-                .await
-        }
-
-        pub async fn get_component_status(&self, component: &str) -> anyhow::Result<Response> {
+        pub async fn get_component_status(
+            &self,
+            component: &str,
+            page: &str,
+        ) -> anyhow::Result<Response> {
             Ok(self
                 .client
-                .get(self.build_request_url(component))
+                .get(self.build_request_url(component, page))
                 .send()
                 .await?)
         }

@@ -1,12 +1,12 @@
 [package]
 name = "status-upstream"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-clap = "3.0"
+clap = "3.1"
 env_logger = { version = "0.9", optional = true }
 hex-literal = "0.3"
 log = { version = "0.4", features = ["max_level_debug", "release_max_level_debug"] }

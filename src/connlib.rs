@@ -195,9 +195,12 @@ pub mod tcping {
             {
                 Ok(_) => Ok(true),
                 Err(e)
-                if e.kind().eq(&ErrorKind::ConnectionRefused) |
-                    e.kind().eq(&ErrorKind::ConnectionReset) |
-                    e.kind().eq(&ErrorKind::ConnectionAborted) => Ok(false),
+                    if e.kind().eq(&ErrorKind::ConnectionRefused)
+                        | e.kind().eq(&ErrorKind::ConnectionReset)
+                        | e.kind().eq(&ErrorKind::ConnectionAborted) =>
+                {
+                    Ok(false)
+                }
                 Err(e) => Err(anyhow::Error::from(e)),
             }
         }
@@ -205,9 +208,9 @@ pub mod tcping {
 
     #[cfg(test)]
     mod tcping_test {
-        use std::time::Duration;
-        use crate::connlib::ServiceChecker;
         use crate::connlib::tcping::Tcping;
+        use crate::connlib::ServiceChecker;
+        use std::time::Duration;
 
         #[test]
         #[ignore]
@@ -223,77 +226,178 @@ pub mod tcping {
                     tokio::time::sleep(Duration::from_secs(20)).await;
                 });
         }
-
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ServerLastStatus {
-    Optional,
-    Outage,
-    Unknown,
+pub mod server_last_status {
+    use crate::ComponentStatus;
+    use std::fmt::Formatter;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum ServerLastStatus {
+        Optional,
+        Outage,
+        DegradedPerformance,
+        PartialOutage,
+        Unknown,
+    }
+
+    impl From<&ComponentStatus> for ServerLastStatus {
+        fn from(status: &ComponentStatus) -> Self {
+            match status {
+                ComponentStatus::Operational => Self::Optional,
+                ComponentStatus::DegradedPerformance => Self::DegradedPerformance,
+                ComponentStatus::PartialOutage => Self::PartialOutage,
+                _ => Self::Outage,
+            }
+        }
+    }
+
+    impl TryFrom<&str> for ServerLastStatus {
+        type Error = anyhow::Error;
+
+        fn try_from(value: &str) -> Result<Self, Self::Error> {
+            Ok(match value {
+                "operational" => Self::Optional,
+                "major_outage" => Self::Outage,
+                "degraded_performance" => Self::DegradedPerformance,
+                "partial_outage" => Self::PartialOutage,
+                _ => Self::Unknown,
+            })
+        }
+    }
+
+    impl std::fmt::Display for ServerLastStatus {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}",
+                match self {
+                    ServerLastStatus::Optional => "operational",
+                    ServerLastStatus::Outage => "major_outage",
+                    ServerLastStatus::DegradedPerformance => "degraded_performance",
+                    ServerLastStatus::PartialOutage => "partial_outage",
+                    ServerLastStatus::Unknown => "unknown",
+                }
+            )
+        }
+    }
+
+    impl From<Vec<bool>> for ServerLastStatus {
+        fn from(v: Vec<bool>) -> Self {
+            if v.is_empty() {
+                return Self::Unknown;
+            }
+            if v.iter().all(|x| *x) {
+                return Self::Optional;
+            }
+            if !v.iter().any(|x| *x) {
+                return Self::Outage;
+            }
+            let answer = v.iter().filter(|x| **x == true).count();
+            match v.len() {
+                2 => Self::PartialOutage,
+                n if n > 2 => {
+                    let degraded_level = n as f32 / 3.0 * 2.0;
+                    if answer as f32 / n as f32 >= degraded_level {
+                        Self::DegradedPerformance
+                    } else {
+                        Self::PartialOutage
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl Into<ComponentStatus> for ServerLastStatus {
+        fn into(self) -> ComponentStatus {
+            match self {
+                ServerLastStatus::Optional => ComponentStatus::Operational,
+                ServerLastStatus::Outage => ComponentStatus::MajorOutage,
+                ServerLastStatus::DegradedPerformance => ComponentStatus::DegradedPerformance,
+                ServerLastStatus::PartialOutage => ComponentStatus::PartialOutage,
+                ServerLastStatus::Unknown => unreachable!(),
+            }
+        }
+    }
+
+    /*impl Into<ComponentResponse> for ServerLastStatus {
+        fn into(self) -> ComponentResponse {
+
+        }
+    }*/
 }
 
-impl Into<bool> for &ServerLastStatus {
-    fn into(self) -> bool {
-        match self {
-            ServerLastStatus::Optional => true,
-            _ => false,
+pub use server_last_status::ServerLastStatus;
+
+#[derive(Clone, Debug)]
+pub struct PingAbleService {
+    remote_address: String,
+    service_type: ServiceType,
+}
+
+impl PingAbleService {
+    pub fn remote_address(&self) -> &str {
+        &self.remote_address
+    }
+    pub fn service_type(&self) -> ServiceType {
+        self.service_type
+    }
+
+    pub async fn ping(service: PingAbleService, timeout: u64) -> bool {
+        let ret = match service.service_type() {
+            ServiceType::HTTP => HTTP::new(&service.remote_address()).ping(timeout).await,
+            ServiceType::SSH => SSH::new(&service.remote_address()).ping(timeout).await,
+            ServiceType::TeamSpeak => {
+                TeamSpeak::new(&service.remote_address())
+                    .ping(timeout)
+                    .await
+            }
+            ServiceType::Tcping => Tcping::new(&service.remote_address()).ping(timeout).await,
+        };
+        match ret {
+            Ok(ret) => ret,
+            Err(e) if e.is::<tokio::time::error::Elapsed>() => false,
+            Err(e) => {
+                error!("Got error while ping {}: {:?}", service.remote_address(), e);
+                false
+            }
         }
     }
 }
 
-impl Into<bool> for ServerLastStatus {
-    fn into(self) -> bool {
-        match self {
-            ServerLastStatus::Optional => true,
-            _ => false,
-        }
-    }
-}
+impl TryFrom<&Service> for PingAbleService {
+    type Error = anyhow::Error;
 
-impl From<&ComponentStatus> for ServerLastStatus {
-    fn from(status: &ComponentStatus) -> Self {
-        match status {
-            ComponentStatus::Operational => Self::Optional,
-            _ => Self::Outage,
-        }
-    }
-}
-
-impl From<bool> for ServerLastStatus {
-    fn from(b: bool) -> Self {
-        Self::from(&b)
-    }
-}
-
-impl From<&bool> for ServerLastStatus {
-    fn from(b: &bool) -> Self {
-        if *b {
-            Self::Optional
-        } else {
-            Self::Outage
-        }
-    }
-}
-
-impl PartialEq<bool> for ServerLastStatus {
-    fn eq(&self, other: &bool) -> bool {
-        match self {
-            ServerLastStatus::Optional => *other,
-            ServerLastStatus::Outage => !other,
-            // use false to make sure target is updated
-            ServerLastStatus::Unknown => false,
-        }
+    fn try_from(value: &Service) -> Result<Self, Self::Error> {
+        let service_type = value.service_type().to_lowercase();
+        let service_type = match service_type.as_str() {
+            "teamspeak" | "ts" => ServiceType::TeamSpeak,
+            "ssh" => ServiceType::SSH,
+            "http" => ServiceType::HTTP,
+            "tcping" => ServiceType::Tcping,
+            &_ => {
+                return Err(anyhow!(
+                    "Unexpect service type: {}, address => {}",
+                    value.service_type(),
+                    value.address()
+                ));
+            }
+        };
+        Ok(Self {
+            remote_address: value.address().to_string(),
+            service_type,
+        })
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct ServiceWrapper {
     last_status: ServerLastStatus,
-    remote_address: String,
+    services: Vec<PingAbleService>,
     report_uuid: String,
-    service_type: ServiceType,
+    page: String,
     count: u64,
 }
 
@@ -312,38 +416,32 @@ impl ServiceWrapper {
     pub fn report_uuid(&self) -> &str {
         &self.report_uuid
     }
-    pub fn service_type(&self) -> &ServiceType {
-        &self.service_type
-    }
 
-    pub async fn ping(&self, timeout: u64) -> anyhow::Result<bool> {
-        match self.service_type() {
-            ServiceType::HTTP => HTTP::new(&self.remote_address).ping(timeout).await,
-            ServiceType::SSH => SSH::new(&self.remote_address).ping(timeout).await,
-            ServiceType::TeamSpeak => TeamSpeak::new(&self.remote_address).ping(timeout).await,
-            ServiceType::Tcping => Tcping::new(&self.remote_address).ping(timeout).await,
-        }
-    }
     pub fn last_status(&self) -> &ServerLastStatus {
         &self.last_status
-    }
-    pub fn remote_address(&self) -> &str {
-        &self.remote_address
     }
 
     pub fn ongoing_recheck(&self) -> bool {
         self.count > 0
     }
 
-    pub fn check_last_status_eq(&self, last_status: bool) -> bool {
-        self.last_status == last_status
+    pub async fn ping(&self, timeout: u64) -> Vec<bool> {
+        let mut v = Vec::new();
+        let services = self.services.clone();
+        for element in services
+            .into_iter()
+            .map(|x| tokio::spawn(PingAbleService::ping(x, timeout)))
+        {
+            v.push(element.await.unwrap())
+        }
+        v
     }
 
-    /*pub fn get_current_count(&self) -> u64 {
-        self.count
-    }*/
-
-    pub fn update_last_status_condition(&mut self, last_status: bool, condition: u64) -> bool {
+    pub fn update_last_status_condition(
+        &mut self,
+        last_status: ServerLastStatus,
+        condition: u64,
+    ) -> bool {
         if self.last_status != last_status {
             if self.count >= condition {
                 self.last_status = ServerLastStatus::from(last_status);
@@ -363,55 +461,60 @@ impl ServiceWrapper {
         self.count = 0
     }
 
-    pub async fn from_service(upstream: &Upstream, s: &Service) -> anyhow::Result<Self> {
-        let status = upstream.get_component_status(s.report_uuid()).await?;
+    pub async fn from_service(upstream: &Upstream, s: &Component) -> anyhow::Result<Self> {
+        let status = upstream
+            .get_component_status(s.report_uuid(), s.page())
+            .await?;
         let status = status.json::<ComponentResponse>().await?;
         Self::new_with_last_status(s, ServerLastStatus::from(&ComponentStatus::from(&status)))
     }
 
     pub fn new_with_last_status(
-        s: &Service,
+        s: &Component,
         last_status: ServerLastStatus,
     ) -> anyhow::Result<Self> {
-        let service_type = s.service_type().to_lowercase();
-        let service_type = match service_type.as_str() {
-            "teamspeak" | "ts" => ServiceType::TeamSpeak,
-            "ssh" => ServiceType::SSH,
-            "http" => ServiceType::HTTP,
-            "tcping" => ServiceType::Tcping,
-            &_ => {
-                return Err(anyhow!(
-                    "Unexpect service type: {}, identify id => {}",
-                    s.service_type(),
-                    s.report_uuid()
-                ));
-            }
-        };
+        let mut v = Vec::new();
+        for service in s.addresses() {
+            v.push(PingAbleService::try_from(service)?)
+        }
+
         Ok(Self::new(
+            v,
             last_status.clone(),
             s.report_uuid().to_string(),
-            service_type,
-            s.remote_address().to_string(),
+            s.page().to_lowercase(),
         ))
     }
 
     pub fn new(
+        services: Vec<PingAbleService>,
         last_status: ServerLastStatus,
         identify_id: String,
-        service_type: ServiceType,
-        remote_address: String,
+        page: String,
     ) -> Self {
         Self {
             last_status,
+            services,
             report_uuid: identify_id,
-            service_type,
-            remote_address,
+            page,
             count: 0,
         }
     }
+
+    pub fn page(&self) -> &str {
+        &self.page
+    }
+
+    pub fn remote_address(&self) -> String {
+        if !self.services.is_empty() {
+            return self.services.get(0).unwrap().remote_address().to_string();
+        }
+        self.report_uuid.clone()
+    }
 }
 
-use crate::configure::Service;
+use crate::configure::{Component, Service};
+use crate::connlib::tcping::Tcping;
 use crate::statuspagelib::Upstream;
 use crate::ComponentStatus;
 use anyhow::anyhow;
@@ -419,4 +522,8 @@ pub use http::HTTP;
 use serde_derive::Deserialize;
 pub use ssh::SSH;
 pub use teamspeak::TeamSpeak;
-use crate::connlib::tcping::Tcping;
+
+#[cfg(any(feature = "env_logger", feature = "log4rs"))]
+use log::error;
+#[cfg(feature = "spdlog-rs")]
+use spdlog::prelude::*;
