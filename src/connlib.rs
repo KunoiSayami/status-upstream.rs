@@ -14,7 +14,6 @@
  ** You should have received a copy of the GNU Affero General Public License
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-
 #[async_trait::async_trait]
 pub trait ServiceChecker {
     async fn ping(&self, timeout: u64) -> anyhow::Result<bool>;
@@ -30,12 +29,14 @@ where
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ServiceType {
     HTTP,
     SSH,
     TeamSpeak,
     Tcping,
+    #[cfg(feature = "ping")]
+    ICMP,
 }
 
 pub mod teamspeak {
@@ -229,6 +230,78 @@ pub mod tcping {
     }
 }
 
+#[cfg(feature = "ping")]
+pub mod icmp {
+    use super::error;
+    use super::ServiceChecker;
+    use futures_util::stream::StreamExt;
+    use std::net::IpAddr;
+
+    pub struct ICMP {
+        remote_address: IpAddr,
+    }
+
+    impl ICMP {
+        pub fn new(remote_address: &str) -> Self {
+            Self {
+                remote_address: remote_address
+                    .parse()
+                    .map_err(|e| error!("Got error while parse {}, {:?}", remote_address, e))
+                    .unwrap(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ServiceChecker for ICMP {
+        async fn ping(&self, _timeout: u64) -> anyhow::Result<bool> {
+            let pinger = tokio_icmp_echo::Pinger::new()
+                .await
+                .map_err(|e| error!("Got error while create pinger: {:?}", e))
+                .unwrap();
+            let mut take = pinger.chain(self.remote_address).stream().take(1);
+            if let Some(ret) = take.next().await {
+                let r = ret
+                    .map_err(|e| error!("Got error while ping: {:?}", e))
+                    .unwrap_or(None);
+                Ok(r.is_some())
+            } else {
+                Ok(false)
+            }
+        }
+    }
+
+    async fn async_test() {
+        let addr = "127.0.0.1".parse().unwrap();
+
+        let pinger = tokio_icmp_echo::Pinger::new();
+        let stream = pinger.await.unwrap().chain(addr).stream();
+        let mut ret = stream.take(3);
+        let r = ret
+            .next()
+            .await
+            .unwrap()
+            .map_err(|e| println!("error: {:?}", e))
+            .ok();
+        println!("result: {:?}", r);
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn test() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async_test());
+    }
+
+    pub async fn check_ping_available() -> anyhow::Result<()> {
+        tokio_icmp_echo::Pinger::new().await?;
+        Ok(())
+    }
+}
+
 pub mod server_last_status {
     use crate::ComponentStatus;
     use std::fmt::Formatter;
@@ -309,12 +382,6 @@ pub mod server_last_status {
             }
         }
     }
-
-    /*impl Into<ComponentResponse> for ServerLastStatus {
-        fn into(self) -> ComponentResponse {
-
-        }
-    }*/
 }
 
 pub use server_last_status::ServerLastStatus;
@@ -343,6 +410,8 @@ impl PingAbleService {
                     .await
             }
             ServiceType::Tcping => Tcping::new(&service.remote_address()).ping(timeout).await,
+            #[cfg(feature = "ping")]
+            ServiceType::ICMP => ICMP::new(&service.remote_address()).ping(timeout).await,
         };
         match ret {
             Ok(ret) => ret,
@@ -365,6 +434,8 @@ impl TryFrom<&Service> for PingAbleService {
             "ssh" => ServiceType::SSH,
             "http" => ServiceType::HTTP,
             "tcping" => ServiceType::Tcping,
+            #[cfg(feature = "ping")]
+            "icmp" | "ping" => ServiceType::ICMP,
             &_ => {
                 return Err(anyhow!(
                     "Unexpect service type: {}, address => {}",
@@ -380,15 +451,6 @@ impl TryFrom<&Service> for PingAbleService {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ServiceWrapper {
-    last_status: ServerLastStatus,
-    services: Vec<PingAbleService>,
-    report_uuid: String,
-    page: String,
-    count: u64,
-}
-
 #[derive(Deserialize, Debug, Clone)]
 pub struct ComponentResponse {
     status: String,
@@ -398,6 +460,15 @@ impl ComponentResponse {
     pub fn status(&self) -> &str {
         &self.status
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct ServiceWrapper {
+    last_status: ServerLastStatus,
+    services: Vec<PingAbleService>,
+    report_uuid: String,
+    page: String,
+    count: u64,
 }
 
 impl ServiceWrapper {
@@ -499,6 +570,13 @@ impl ServiceWrapper {
         }
         self.report_uuid.clone()
     }
+
+    #[cfg(feature = "ping")]
+    pub fn has_icmp_ping(&self) -> bool {
+        self.services
+            .iter()
+            .any(|x| x.service_type() == ServiceType::ICMP)
+    }
 }
 
 use crate::configure::{Component, Service};
@@ -511,6 +589,8 @@ use serde_derive::Deserialize;
 pub use ssh::SSH;
 pub use teamspeak::TeamSpeak;
 
+#[cfg(feature = "ping")]
+use crate::connlib::icmp::ICMP;
 #[cfg(any(feature = "env_logger", feature = "log4rs"))]
 use log::error;
 #[cfg(feature = "spdlog-rs")]

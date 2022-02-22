@@ -95,6 +95,17 @@ impl Configure {
             upstream,
         })
     }
+
+    #[cfg(feature = "ping")]
+    pub async fn check_icmp_ping_available(&self) -> anyhow::Result<()> {
+        use crate::connlib::icmp::check_ping_available;
+
+        if self.services().iter().any(|x| x.has_icmp_ping()) {
+            check_ping_available().await?
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

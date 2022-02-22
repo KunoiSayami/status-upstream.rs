@@ -118,6 +118,12 @@ async fn async_main(config_file: Option<&str>, cache_file: Option<&str>) -> anyh
     )
     .await?;
 
+    #[cfg(feature = "ping")]
+    config
+        .check_icmp_ping_available()
+        .await
+        .map_err(|e| anyhow!("Got error while check ICMP ping availability: {:?}", e))?;
+
     let config = Arc::new(Mutex::new(config));
     let alt_config = config.clone();
     let main_future = if interval == 0 {
