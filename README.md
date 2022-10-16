@@ -1,9 +1,5 @@
-Statuspage.io upstream
+Status page upstream server
 ====
-
-## NOTE
-
-You may need privilege elevation to use ICMP ping.
 
 ## License
 
