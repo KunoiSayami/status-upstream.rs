@@ -1,15 +1,19 @@
 [package]
 name = "status-upstream"
-version = "0.7.2"
+version = "0.8.0-alpha"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-clap = "3.1"
+axum = "0.6.0-rc.2"
+axum-auth = "0.3"
+axum-server = "0.4.2"
+clap = "4.0.15"
 env_logger = { version = "0.9", optional = true }
 futures-util = { version = "0.3.21", optional = true }
 hex-literal = "0.3"
+hyper = { version = "0.14.20", features = ["http2"] }
 log = { version = "0.4", features = ["max_level_debug", "release_max_level_debug"] }
 log4rs = { version = "1.0", optional = true }
 reqwest = { version = "0.11", default-features = false, features = ["json", "serde_json", "socks", "rustls-tls"] }
@@ -17,9 +21,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
 spdlog-rs = { version = "0.2", features = ["level-trace", "release-level-debug", "log"], optional = true }
+sqlx = { version = "0.6.2", features = ["runtime-tokio-rustls", "sqlite"] }
 tokio = { version = "1", features = ["full"] }
 tokio-icmp-echo = { version = "0.4.0", optional = true }
 toml = "0.5"
+tower = "0.4"
+tower-http = { version = "0.3.4", features = ["trace"] }
 
 [profile.release]
 opt-level = 3

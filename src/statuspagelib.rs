@@ -18,10 +18,9 @@
 const UPSTREAM_URL: &str = "https://api.statuspage.io/";
 
 mod v1 {
-    use crate::configure::TomlConfigure;
-    use crate::connlib::ComponentResponse;
-    use crate::statuspagelib::UPSTREAM_URL;
-    use crate::ServerLastStatus;
+    use super::UPSTREAM_URL;
+    use crate::web_service::datastructure_current::ServerLastStatus;
+    use crate::Configure;
     use anyhow::anyhow;
     use reqwest::header::{HeaderMap, HeaderValue};
     use reqwest::{Client, Response};
@@ -36,15 +35,6 @@ mod v1 {
         DegradedPerformance,
         PartialOutage,
         MajorOutage,
-    }
-
-    impl From<&ComponentResponse> for ComponentStatus {
-        fn from(s: &ComponentResponse) -> Self {
-            match Self::try_from(s.status()) {
-                Ok(s) => s,
-                Err(_) => unreachable!("This code maybe outdated, if you sure this is wrong, please open a issue to report."),
-            }
-        }
     }
 
     impl TryFrom<&str> for ComponentStatus {
@@ -106,20 +96,26 @@ mod v1 {
     }
 
     impl Upstream {
-        pub fn from_configure(cfg: &TomlConfigure) -> Upstream {
+        pub fn from_configure(cfg: &Configure) -> anyhow::Result<Option<Upstream>> {
+            if !cfg.statuspage().enabled() {
+                return Ok(None);
+            }
+            if cfg.statuspage().oauth().is_empty() {
+                return Err(anyhow!("OAUTH Field is empty"));
+            }
             let mut map = HeaderMap::new();
             map.insert(
                 "Authorization",
-                HeaderValue::from_str(cfg.upstream().oauth())
+                HeaderValue::from_str(cfg.statuspage().oauth())
                     .expect("OAuth Header value parse error"),
             );
-            Self {
+            Ok(Some(Self {
                 client: reqwest::ClientBuilder::new()
                     .default_headers(map.clone())
                     .timeout(Duration::from_secs(10))
                     .build()
                     .unwrap(),
-            }
+            }))
         }
 
         pub async fn set_component_status(

@@ -15,108 +15,58 @@
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::cache::CacheData;
-use crate::connlib::{PingAbleService, ServerLastStatus, ServiceWrapper};
-use crate::statuspagelib::Upstream;
+use crate::DEFAULT_DATABASE_LOCATION;
 use anyhow::anyhow;
 #[cfg(any(feature = "env_logger", feature = "log4rs"))]
 use log::{error, warn};
 use serde_derive::{Deserialize, Serialize};
 #[cfg(feature = "spdlog-rs")]
 use spdlog::prelude::*;
-use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::Path;
-use toml::Value;
 
-#[derive(Clone, Debug)]
-pub struct Configure {
-    services: Vec<ServiceWrapper>,
-    upstream: Upstream,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ServerConfig {
+    addr: String,
+    port: u16,
+    auth_header: Option<String>,
+    public_status_page: bool,
+    database_location: Option<String>,
 }
 
-impl Configure {
-    pub fn mut_services(&mut self) -> &mut Vec<ServiceWrapper> {
-        &mut self.services
+impl ServerConfig {
+    pub fn addr(&self) -> &str {
+        &self.addr
     }
-
-    pub fn services(&self) -> &Vec<ServiceWrapper> {
-        &self.services
+    pub fn port(&self) -> u16 {
+        self.port
     }
-
-    pub fn upstream(&self) -> &Upstream {
-        &self.upstream
+    pub fn auth_header(&self) -> String {
+        match self.auth_header {
+            None => String::new(),
+            Some(ref auth) => auth.clone(),
+        }
     }
-
-    fn convert_cache_vec_to_map(cache: Option<CacheData>) -> HashMap<String, ServerLastStatus> {
-        let mut map: HashMap<String, ServerLastStatus> = Default::default();
-        if let Some(cache) = cache {
-            for status in cache.data() {
-                map.insert(
-                    status.id().to_string(),
-                    ServerLastStatus::try_from(status.last_status()).unwrap(),
-                );
-            }
-        }
-        map
+    pub fn public_status_page(&self) -> bool {
+        self.public_status_page
     }
-
-    pub async fn try_from(value: TomlConfigure, cache: Option<CacheData>) -> anyhow::Result<Self> {
-        let upstream = Upstream::from_configure(&value);
-        let cache_data = Self::convert_cache_vec_to_map(cache);
-        let mut result = vec![];
-        for service in value.services.0 {
-            let component: Component = service.try_into()?;
-            let service_w = if let Some(status) = cache_data.get(component.report_uuid()) {
-                ServiceWrapper::new_with_last_status(&component, *status)
-            } else {
-                ServiceWrapper::from_service(&upstream, &component).await
-            };
-            if let Err(ref e) = service_w {
-                error!(
-                    "Got error while processing transform services: {:?} error: {:?}",
-                    &component, e
-                );
-            }
-            result.push(service_w.unwrap());
+    pub fn database_location(&self) -> String {
+        match self.database_location {
+            None => DEFAULT_DATABASE_LOCATION.to_string(),
+            Some(ref location) => location.clone(),
         }
-
-        // Check duplicate component_id
-        let mut id_checker = HashSet::new();
-        for service in &result {
-            id_checker.insert(service.report_uuid());
-        }
-        if id_checker.len() != result.len() {
-            warn!("Duplicate component_id detected");
-        }
-
-        Ok(Self {
-            services: result,
-            upstream,
-        })
-    }
-
-    #[cfg(feature = "ping")]
-    pub async fn check_icmp_ping_available(&self) -> anyhow::Result<()> {
-        use crate::connlib::icmp::check_ping_available;
-
-        if self.services().iter().any(|x| x.has_icmp_ping()) {
-            check_ping_available().await?
-        }
-
-        Ok(())
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TomlConfigure {
-    upstream: TomlUpstream,
-    services: Components,
-    config: ServerConfig,
+pub struct Configure {
+    statuspage: StatusPageUpstream,
+    components: Components,
+    server: ServerConfig,
 }
 
-impl TomlConfigure {
-    pub async fn init_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<TomlConfigure> {
+impl Configure {
+    pub async fn init_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Configure> {
         let context = tokio::fs::read_to_string(&path).await;
         if let Err(ref e) = context {
             error!(
@@ -139,169 +89,76 @@ impl TomlConfigure {
         };
         Ok(cfg)
     }
-    pub fn upstream(&self) -> &TomlUpstream {
-        &self.upstream
+
+    pub fn statuspage(&self) -> &StatusPageUpstream {
+        &self.statuspage
     }
-    pub fn config(&self) -> &ServerConfig {
-        &self.config
+    pub fn server(&self) -> &ServerConfig {
+        &self.server
     }
 
     pub fn is_empty_services(&self) -> bool {
-        self.services.0.is_empty()
+        self.components.0.is_empty()
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TomlUpstream {
+pub struct StatusPageUpstream {
+    enabled: bool,
+    #[serde(default)]
     oauth: String,
 }
 
-impl TomlUpstream {
+impl StatusPageUpstream {
     pub fn oauth(&self) -> &str {
         &self.oauth
     }
-}
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ServerConfig {
-    interval: Option<u64>,
-    retries_times: Option<u64>,
-    retries_interval: Option<u64>,
-}
-
-impl ServerConfig {
-    pub fn interval(&self) -> &Option<u64> {
-        &self.interval
-    }
-    pub fn retries_times(&self) -> Option<u64> {
-        self.retries_times
-    }
-    pub fn retries_interval(&self) -> Option<u64> {
-        self.retries_interval
+    pub fn enabled(&self) -> bool {
+        self.enabled
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Components(Vec<TomlComponent>);
+pub struct Components(Vec<Component>);
 
-#[derive(Clone, Debug)]
-pub struct Service {
-    address: String,
-    service_type: String,
-}
-
-impl Service {
-    pub fn address(&self) -> &str {
-        &self.address
-    }
-    pub fn service_type(&self) -> &str {
-        &self.service_type
-    }
-}
-
-impl TryInto<PingAbleService> for Service {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> Result<PingAbleService, Self::Error> {
-        PingAbleService::try_from(&self)
-    }
-}
-
-impl TryFrom<&str> for Service {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        if !value.contains('|') {
-            return Err(anyhow!("FormatError: missing '|' (raw: {})", value));
-        }
-        let (address, service_type) = value.split_once('|').unwrap();
-        Ok(Self {
-            address: address.to_string(),
-            service_type: service_type.to_string(),
-        })
-    }
-}
-
-impl TryFrom<&String> for Service {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &String) -> Result<Self, Self::Error> {
-        Self::try_from(value.as_str())
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Component {
-    addresses: Vec<Service>,
+    uuid: String,
+    name: String,
+    #[serde(default)]
     identity_id: String,
+    #[serde(default)]
     page: String,
 }
 
 impl Component {
-    pub fn addresses(&self) -> &Vec<Service> {
-        &self.addresses
-    }
-    pub fn report_uuid(&self) -> &str {
+    pub fn report_id(&self) -> &str {
         &self.identity_id
     }
+
     pub fn page(&self) -> &str {
         &self.page
     }
-    pub fn new(addresses: Vec<Service>, identity_id: String, page: String) -> Self {
-        Component {
-            addresses,
+
+    pub fn new(uuid: String, name: String, identity_id: String, page: String) -> Self {
+        Self {
+            uuid,
+            name,
             identity_id,
             page,
         }
     }
-}
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TomlComponent {
-    addresses: toml::Value,
-    identity_id: String,
-    page: String,
-}
-
-impl TomlComponent {
-    pub fn try_get_services(&self) -> anyhow::Result<Vec<Service>> {
-        self.clone().try_into()
+    pub fn uuid(&self) -> &str {
+        &self.uuid
     }
-}
 
-impl TryInto<Component> for TomlComponent {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> Result<Component, Self::Error> {
-        Ok(Component::new(
-            self.try_get_services()?,
-            self.identity_id,
-            self.page,
-        ))
+    pub fn name(&self) -> &str {
+        &self.name
     }
-}
 
-impl TryInto<Vec<Service>> for TomlComponent {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> Result<Vec<Service>, Self::Error> {
-        let mut v = Vec::default();
-
-        match self.addresses {
-            Value::String(s) => {
-                v.push(Service::try_from(&s)?);
-                Ok(v)
-            }
-            Value::Array(array) => {
-                for element in array {
-                    match element {
-                        Value::String(s) => v.push(Service::try_from(&s)?),
-                        _ => return Err(anyhow!("Unexpected value inside address array.")),
-                    }
-                }
-                Ok(v)
-            }
-            _ => Err(anyhow!("Unexpected value in addresses field.")),
-        }
+    pub fn need_push(&self) -> bool {
+        !self.identity_id.is_empty() && !self.page.is_empty()
     }
 }

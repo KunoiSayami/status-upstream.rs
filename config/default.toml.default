@@ -1,17 +1,24 @@
-[upstream]
+[statuspage]
+enabled = false
 oauth = ""
 
-[config]
-# interval = 0
-# retries_times = 3
-# retries_interval = 5
+[server]
+addr = "127.0.0.1"
+port = 41132
+auth_header = ""
+public_status_page = false
+# database_location = "database.db"
 
 [[servers]]
-addresses = ["example.com:11451|ssh", "example.moe:22|teamspeak"]
+uuid = ""
+name = ""
+# use for status page [optional]
 identity_id = ""
+# use for status page [optional]
 page = ""
 
 [[servers]]
-addresses = "example.com:19198|tcping"
+uuid = ""
+name = ""
 identity_id = ""
 page = ""
