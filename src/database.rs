@@ -3,6 +3,7 @@ pub mod v1 {
             "uuid"	TEXT NOT NULL,
             "status"	TEXT NOT NULL,
             "last_update"	TEXT,
+            "need_upload"   INTEGER NOT NULL,
         );
         CREATE TABLE "upstream_meta" (
             "key"	TEXT NOT NULL,
@@ -12,4 +13,12 @@ pub mod v1 {
         INSERT INTO "fdc_meta" VALUES ("version", "1");
         "#;
     pub const VERSION: &str = "1";
+}
+
+pub fn get_current_timestamp() -> u64 {
+    let start = std::time::SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Time went backwards");
+    since_the_epoch.as_secs()
 }

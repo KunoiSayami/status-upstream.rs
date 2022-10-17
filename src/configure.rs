@@ -16,7 +16,6 @@
  */
 
 use crate::DEFAULT_DATABASE_LOCATION;
-use anyhow::anyhow;
 #[cfg(any(feature = "env_logger", feature = "log4rs"))]
 use log::{error, warn};
 use serde_derive::{Deserialize, Serialize};
@@ -99,6 +98,9 @@ impl Configure {
 
     pub fn is_empty_services(&self) -> bool {
         self.components.0.is_empty()
+    }
+    pub fn components(&self) -> &Vec<Component> {
+        &self.components.0
     }
 }
 

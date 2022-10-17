@@ -19,16 +19,16 @@
 compile_error!("You should choose only one log feature");
 
 use crate::configure::Configure;
+use crate::database::get_current_timestamp;
 use crate::web_service::v1::make_router;
 use anyhow::anyhow;
-use axum::{Json, Router};
 use clap::{arg, Command};
 #[cfg(any(feature = "env_logger", feature = "log4rs"))]
 use log::{debug, info};
 #[cfg(feature = "spdlog-rs")]
 use spdlog::{default_logger, init_log_crate_proxy, prelude::*, sink::FileSink};
 use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::ConnectOptions;
+use sqlx::{ConnectOptions, SqliteConnection};
 
 mod configure;
 mod database;
@@ -36,6 +36,43 @@ mod statuspagelib;
 mod web_service;
 
 const DEFAULT_DATABASE_LOCATION: &str = "database.db";
+
+async fn check_database(
+    config: &Configure,
+    mut conn: SqliteConnection,
+) -> anyhow::Result<SqliteConnection> {
+    for component in config.components() {
+        let ret = sqlx::query_as::<_, (i32,)>(r#"SELECT 1 FROM "machines" WHERE "uuid" = ?"#)
+            .bind(component.uuid())
+            .fetch_optional(&mut conn)
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "Get component error in check_database function {}: {:?}",
+                    component.uuid(),
+                    e
+                )
+            })?;
+        if ret.is_none() {
+            sqlx::query(r#"INSERT INTO "machines" VALUES (?, 'unknown', ?, ?)"#)
+                .bind(component.uuid())
+                .bind(get_current_timestamp() as u32)
+                .bind(component.need_push())
+                .execute(&mut conn)
+                .await
+                .map_err(|e| {
+                    anyhow!(
+                        "Insert component error in check_database function {}: {:?}",
+                        component.uuid(),
+                        e
+                    )
+                })?;
+            info!("Insert {} into database", component.uuid())
+        }
+        // Current not check uuid not in database.
+    }
+    Ok(conn)
+}
 
 async fn async_main(config_file: &str) -> anyhow::Result<()> {
     let config = Configure::init_from_path(config_file)
@@ -57,25 +94,38 @@ async fn async_main(config_file: &str) -> anyhow::Result<()> {
     let router = make_router(sqlite_connection);
     let bind = format!("{}:{}", config.server().addr(), config.server().port());
     let server_handler = axum_server::Handle::new();
-    let server =
-        tokio::spawn(axum::Server::bind(&bind.parse().unwrap()).serve(router.into_make_service()));
+    let server = tokio::spawn(
+        axum_server::bind(bind.parse().unwrap())
+            .handle(server_handler.clone())
+            .serve(router.into_make_service()),
+    );
 
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {},
-        _ = server => {}
+        _ = async {
+            tokio::signal::ctrl_c();
+            info!("Recv Control-C send graceful shutdown command.");
+            server_handler.graceful_shutdown(None);
+            tokio::signal::ctrl_c();
+            warn!("Force to exit!");
+            std::process::exit(137)
+        } => {
+
+        },
+        _ = server => {
+        }
     }
     Ok(())
 }
 
 #[cfg(feature = "spdlog-rs")]
 fn init_spdlog_file(log_target: &str, is_debug: bool) {
-    let file_sink = Arc::new(FileSink::new(log_target, false).unwrap_or_else(|e| {
+    let file_sink = std::sync::Arc::new(FileSink::new(log_target, false).unwrap_or_else(|e| {
         eprintln!("Got error while create log file: {:?}", e);
         std::process::exit(1);
     }));
     // stdout & stderr
     let default_sinks = default_logger().sinks().to_owned();
-    let logger = Arc::new(
+    let logger = std::sync::Arc::new(
         Logger::builder()
             .sinks(default_sinks)
             .sink(file_sink)

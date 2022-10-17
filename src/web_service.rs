@@ -1,10 +1,15 @@
 pub mod v1 {
     use super::TransferData;
+    use crate::database::get_current_timestamp;
     use axum::extract::Path;
     use axum::http::StatusCode;
     use axum::response::{IntoResponse, Response};
     use axum::{Json, Router};
+    #[cfg(any(feature = "env_logger", feature = "log4rs"))]
+    use log::error;
     use serde_json::json;
+    #[cfg(feature = "spdlog-rs")]
+    use spdlog::prelude::*;
     use sqlx::SqliteConnection;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -35,19 +40,78 @@ pub mod v1 {
     }
 
     pub async fn post(
-        Path(path): Path<String>,
+        Path(uuid): Path<String>,
         Json(payload): Json<TransferData>,
         sql_conn: Arc<Mutex<SqliteConnection>>,
     ) -> impl IntoResponse {
-        (StatusCode::OK, json!({"status": 200}).to_string()).into_response()
+        let mut sql_conn = sql_conn.lock().await;
+
+        let query = sqlx::query(
+            r#"UPDATE "machines" SET "status" = ?, "last_update" = ? WHERE "uuid" = ?"#,
+        )
+        .bind(payload.status())
+        .bind(get_current_timestamp() as u32)
+        .bind(&uuid)
+        .execute(&mut *sql_conn)
+        .await
+        .map_err(|e| {
+            error!(
+                "Update database for {} to {} error: {:?}",
+                &uuid,
+                payload.status(),
+                e
+            )
+        });
+        if query.is_ok() {
+            if sqlx::query_as::<_, (bool,)>(
+                r#"SELECT "need_upload" FROM "matchines" WHERE "uuid" = ?"#,
+            )
+            .bind(&uuid)
+            .fetch_optional(&mut *sql_conn)
+            .await
+            .map_err(|e| error!("Fetch {} need_upload field error: {:?}", &uuid, e))
+            {}
+            (StatusCode::OK, json!({"status": 200}).to_string())
+        } else {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"status": 500}).to_string(),
+            )
+        }
+        .into_response()
     }
 
-    pub async fn get(Path(path): Path<String>, sql_conn: Arc<Mutex<SqliteConnection>>) -> Response {
-        (
-            StatusCode::OK,
-            serde_json::to_string(&TransferData::default()).unwrap(),
-        )
-            .into_response()
+    pub async fn get(Path(uuid): Path<String>, sql_conn: Arc<Mutex<SqliteConnection>>) -> Response {
+        let mut sql_conn = sql_conn.lock().await;
+        let query_result =
+            sqlx::query_as::<_, (String,)>(r#"SELECT "status" FROM "machines" WHERE "uuid" = ? "#)
+                .bind(&uuid)
+                .fetch_optional(&mut *sql_conn)
+                .await
+                .map_err(|e| {
+                    error!(
+                        "Got error while fetching component {} status: {:?}",
+                        &uuid, e
+                    )
+                });
+        if let Ok(query_result) = query_result {
+            match query_result {
+                None => (
+                    StatusCode::NOT_FOUND,
+                    serde_json::to_string(&TransferData::not_found()).unwrap(),
+                ),
+                Some((result,)) => (
+                    StatusCode::OK,
+                    serde_json::to_string(&TransferData::new(result)).unwrap(),
+                ),
+            }
+        } else {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"status": 500}).to_string(),
+            )
+        }
+        .into_response()
     }
 }
 
@@ -63,6 +127,15 @@ pub mod datastructure_v1 {
     impl TransferData {
         pub fn new(status: String) -> Self {
             Self { status }
+        }
+
+        pub fn not_found() -> Self {
+            Self {
+                status: "NOT_FOUND".to_string(),
+            }
+        }
+        pub fn status(&self) -> &str {
+            &self.status
         }
     }
 
