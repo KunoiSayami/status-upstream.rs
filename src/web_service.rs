@@ -1,6 +1,7 @@
 pub mod v1 {
-    use super::TransferData;
+    use crate::configure::Component;
     use crate::database::get_current_timestamp;
+    use crate::datastructures::{ServerLastStatus, TransferData, UpstreamTrait};
     use axum::extract::Path;
     use axum::http::StatusCode;
     use axum::response::{IntoResponse, Response};
@@ -17,9 +18,11 @@ pub mod v1 {
     use tower_http::trace::TraceLayer;
 
     pub const VERSION: &str = "1";
+    pub type FetchReturnType = (String, Option<String>, Option<String>);
 
-    pub fn make_router(conn: SqliteConnection) -> Router {
+    pub fn make_router(conn: SqliteConnection, upstream: Box<dyn UpstreamTrait>) -> Router {
         let conn = Arc::new(Mutex::new(conn));
+        let upstream = Arc::new(upstream);
         Router::new()
             .route(
                 "/v1/components/:component_id",
@@ -29,7 +32,8 @@ pub mod v1 {
                 })
                 .post({
                     let conn = conn.clone();
-                    |path, payload| async move { post(path, payload, conn).await }
+                    let upstream = upstream.clone();
+                    |path, payload| async move { post(path, payload, upstream, conn).await }
                 }),
             )
             .route(
@@ -42,11 +46,51 @@ pub mod v1 {
     pub async fn post(
         Path(uuid): Path<String>,
         Json(payload): Json<TransferData>,
+        upstream: Arc<Box<dyn UpstreamTrait>>,
         sql_conn: Arc<Mutex<SqliteConnection>>,
     ) -> impl IntoResponse {
+        let last_status = ServerLastStatus::try_from(payload.status())
+            .map_err(|e| error!("Got error while read data: {:?}", e));
+
+        let last_status = match last_status {
+            Ok(status) => status,
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({"status": 500}).to_string(),
+                )
+                    .into_response()
+            }
+        };
+
         let mut sql_conn = sql_conn.lock().await;
 
-        let query = sqlx::query(
+        let ret = sqlx::query_as::<_, FetchReturnType>(
+            r#"SELECT "uuid", "page", "component_id" FROM "matchines" WHERE "uuid" = ?"#,
+        )
+        .bind(&uuid)
+        .fetch_optional(&mut *sql_conn)
+        .await
+        .map_err(|e| error!("Fetch {} component error: {:?}", &uuid, e))
+        .map(|r| {
+            if r.is_none() {
+                error!("Fetch component {} is null", &uuid)
+            }
+            r
+        });
+
+        let component = match ret {
+            Ok(Some(ret)) => Component::from(ret),
+            _ => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({"status": 500}).to_string(),
+                )
+                    .into_response();
+            }
+        };
+
+        let query_ret = sqlx::query(
             r#"UPDATE "machines" SET "status" = ?, "last_update" = ? WHERE "uuid" = ?"#,
         )
         .bind(payload.status())
@@ -62,15 +106,13 @@ pub mod v1 {
                 e
             )
         });
-        if query.is_ok() {
-            if sqlx::query_as::<_, (bool,)>(
-                r#"SELECT "need_upload" FROM "matchines" WHERE "uuid" = ?"#,
-            )
-            .bind(&uuid)
-            .fetch_optional(&mut *sql_conn)
+
+        let upstream_ret = upstream
+            .set_component_status(component.report_id(), component.page(), last_status.into())
             .await
-            .map_err(|e| error!("Fetch {} need_upload field error: {:?}", &uuid, e))
-            {}
+            .map_err(|e| error!("Got error while upload status to server: {:?}", e));
+
+        if query_ret.is_ok() && upstream_ret.is_ok() {
             (StatusCode::OK, json!({"status": 200}).to_string())
         } else {
             (
@@ -115,79 +157,5 @@ pub mod v1 {
     }
 }
 
-pub mod datastructure_v1 {
-    use serde_derive::{Deserialize, Serialize};
-    use std::fmt::Formatter;
-
-    #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-    pub struct TransferData {
-        status: String,
-    }
-
-    impl TransferData {
-        pub fn new(status: String) -> Self {
-            Self { status }
-        }
-
-        pub fn not_found() -> Self {
-            Self {
-                status: "NOT_FOUND".to_string(),
-            }
-        }
-        pub fn status(&self) -> &str {
-            &self.status
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq)]
-    pub enum ServerLastStatus {
-        Optional,
-        Outage,
-        DegradedPerformance,
-        PartialOutage,
-        Unknown,
-    }
-
-    impl TryFrom<&String> for ServerLastStatus {
-        type Error = anyhow::Error;
-
-        fn try_from(value: &String) -> Result<Self, Self::Error> {
-            Self::try_from(value.as_str())
-        }
-    }
-
-    impl TryFrom<&str> for ServerLastStatus {
-        type Error = anyhow::Error;
-
-        fn try_from(value: &str) -> Result<Self, Self::Error> {
-            Ok(match value {
-                "operational" => Self::Optional,
-                "major_outage" => Self::Outage,
-                "partial_outage" => Self::PartialOutage,
-                "degraded_performance" => ServerLastStatus::DegradedPerformance,
-                _ => Self::Unknown,
-            })
-        }
-    }
-
-    impl std::fmt::Display for ServerLastStatus {
-        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "{}",
-                match self {
-                    ServerLastStatus::Optional => "operational",
-                    ServerLastStatus::Outage => "major_outage",
-                    ServerLastStatus::DegradedPerformance => "degraded_performance",
-                    ServerLastStatus::PartialOutage => "partial_outage",
-                    ServerLastStatus::Unknown => "unknown",
-                }
-            )
-        }
-    }
-}
-
 pub use current::VERSION as CURRENT_VERSION;
-pub use datastructure_current::TransferData;
-pub use datastructure_v1 as datastructure_current;
 pub use v1 as current;

@@ -15,9 +15,10 @@
  ** along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::web_service::current::FetchReturnType;
 use crate::DEFAULT_DATABASE_LOCATION;
 #[cfg(any(feature = "env_logger", feature = "log4rs"))]
-use log::{error, warn};
+use log::error;
 use serde_derive::{Deserialize, Serialize};
 #[cfg(feature = "spdlog-rs")]
 use spdlog::prelude::*;
@@ -162,5 +163,16 @@ impl Component {
 
     pub fn need_push(&self) -> bool {
         !self.identity_id.is_empty() && !self.page.is_empty()
+    }
+}
+
+impl From<FetchReturnType> for Component {
+    fn from(ret: FetchReturnType) -> Self {
+        Self {
+            uuid: ret.0,
+            name: "".to_string(),
+            identity_id: ret.2.unwrap_or_else(|| "".to_string()),
+            page: ret.1.unwrap_or_else(|| "".to_string()),
+        }
     }
 }

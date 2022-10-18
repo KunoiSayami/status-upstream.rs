@@ -20,11 +20,13 @@ compile_error!("You should choose only one log feature");
 
 use crate::configure::Configure;
 use crate::database::get_current_timestamp;
+use crate::datastructures::{EmptyUpstream, UpstreamTrait};
+use crate::statuspagelib::StatusPageUpstream;
 use crate::web_service::v1::make_router;
 use anyhow::anyhow;
 use clap::{arg, Command};
 #[cfg(any(feature = "env_logger", feature = "log4rs"))]
-use log::{debug, info};
+use log::{info, warn};
 #[cfg(feature = "spdlog-rs")]
 use spdlog::{default_logger, init_log_crate_proxy, prelude::*, sink::FileSink};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -32,6 +34,7 @@ use sqlx::{ConnectOptions, SqliteConnection};
 
 mod configure;
 mod database;
+mod datastructures;
 mod statuspagelib;
 mod web_service;
 
@@ -54,10 +57,20 @@ async fn check_database(
                 )
             })?;
         if ret.is_none() {
-            sqlx::query(r#"INSERT INTO "machines" VALUES (?, 'unknown', ?, ?)"#)
+            sqlx::query(r#"INSERT INTO "machines" VALUES (?, 'unknown', ?, ?, ?, ?)"#)
                 .bind(component.uuid())
                 .bind(get_current_timestamp() as u32)
                 .bind(component.need_push())
+                .bind(if component.page().is_empty() {
+                    None
+                } else {
+                    Some(component.page().to_string())
+                })
+                .bind(if component.report_id().is_empty() {
+                    None
+                } else {
+                    Some(component.report_id().to_string())
+                })
                 .execute(&mut conn)
                 .await
                 .map_err(|e| {
@@ -79,6 +92,12 @@ async fn async_main(config_file: &str) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow!("Read configure file failure: {:?}", e))?;
 
+    let upstream: Box<dyn UpstreamTrait> = if config.statuspage().enabled() {
+        Box::new(StatusPageUpstream::from_configure(&config)?.unwrap())
+    } else {
+        Box::new(EmptyUpstream::default())
+    };
+
     let sqlite_connection = SqliteConnectOptions::new()
         .filename(config.server().database_location())
         .connect()
@@ -91,7 +110,7 @@ async fn async_main(config_file: &str) -> anyhow::Result<()> {
             )
         })?;
 
-    let router = make_router(sqlite_connection);
+    let router = make_router(check_database(&config, sqlite_connection).await?, upstream);
     let bind = format!("{}:{}", config.server().addr(), config.server().port());
     let server_handler = axum_server::Handle::new();
     let server = tokio::spawn(
@@ -102,14 +121,13 @@ async fn async_main(config_file: &str) -> anyhow::Result<()> {
 
     tokio::select! {
         _ = async {
-            tokio::signal::ctrl_c();
+            tokio::signal::ctrl_c().await.unwrap();
             info!("Recv Control-C send graceful shutdown command.");
             server_handler.graceful_shutdown(None);
-            tokio::signal::ctrl_c();
+            tokio::signal::ctrl_c().await.unwrap();
             warn!("Force to exit!");
             std::process::exit(137)
         } => {
-
         },
         _ = server => {
         }

@@ -2,8 +2,9 @@ pub mod v1 {
     pub const CREATE_TABLE: &str = r#"CREATE TABLE "machines" (
             "uuid"	TEXT NOT NULL,
             "status"	TEXT NOT NULL,
-            "last_update"	TEXT,
-            "need_upload"   INTEGER NOT NULL,
+            "last_update"	INTEGER NOT NULL,
+            "page"   TEXT,
+            "component_id" TEXT,
         );
         CREATE TABLE "upstream_meta" (
             "key"	TEXT NOT NULL,

@@ -19,11 +19,11 @@ const UPSTREAM_URL: &str = "https://api.statuspage.io/";
 
 mod v1 {
     use super::UPSTREAM_URL;
-    use crate::web_service::datastructure_current::ServerLastStatus;
+    use crate::datastructures::{ServerLastStatus, UpstreamTrait};
     use crate::Configure;
     use anyhow::anyhow;
     use reqwest::header::{HeaderMap, HeaderValue};
-    use reqwest::{Client, Response};
+    use reqwest::Client;
     use serde_json::json;
     use std::fmt::Formatter;
     use std::time::Duration;
@@ -90,13 +90,19 @@ mod v1 {
         }
     }
 
+    impl From<ServerLastStatus> for ComponentStatus {
+        fn from(status: ServerLastStatus) -> Self {
+            Self::from(&status)
+        }
+    }
+
     #[derive(Debug, Clone)]
-    pub struct Upstream {
+    pub struct StatusPageUpstream {
         client: Client,
     }
 
-    impl Upstream {
-        pub fn from_configure(cfg: &Configure) -> anyhow::Result<Option<Upstream>> {
+    impl StatusPageUpstream {
+        pub fn from_configure(cfg: &Configure) -> anyhow::Result<Option<StatusPageUpstream>> {
             if !cfg.statuspage().enabled() {
                 return Ok(None);
             }
@@ -118,26 +124,6 @@ mod v1 {
             }))
         }
 
-        pub async fn set_component_status(
-            &self,
-            component: &str,
-            page: &str,
-            status: ComponentStatus,
-        ) -> anyhow::Result<Response> {
-            //let status = status.to_string();
-            let payload = json!({
-                "component": {
-                    "status": status.to_string()
-                }
-            });
-            Ok(self
-                .client
-                .patch(self.build_request_url(component, page))
-                .json(&payload)
-                .send()
-                .await?)
-        }
-
         pub fn build_request_url(&self, component_id: &str, page: &str) -> String {
             format!(
                 "{basic_url}v1/pages/{page_id}/components/{component_id}",
@@ -146,20 +132,38 @@ mod v1 {
                 component_id = component_id
             )
         }
+    }
 
-        pub async fn get_component_status(
+    #[async_trait::async_trait]
+    impl UpstreamTrait for StatusPageUpstream {
+        async fn get_component_status(&self, component: &str, page: &str) -> anyhow::Result<()> {
+            self.client
+                .get(self.build_request_url(component, page))
+                .send()
+                .await?;
+            Ok(())
+        }
+
+        async fn set_component_status(
             &self,
             component: &str,
             page: &str,
-        ) -> anyhow::Result<Response> {
-            Ok(self
-                .client
-                .get(self.build_request_url(component, page))
+            status: ComponentStatus,
+        ) -> anyhow::Result<()> {
+            let payload = json!({
+                "component": {
+                    "status": status.to_string()
+                }
+            });
+            self.client
+                .patch(self.build_request_url(component, page))
+                .json(&payload)
                 .send()
-                .await?)
+                .await?;
+            Ok(())
         }
     }
 }
 
 pub use v1::ComponentStatus;
-pub use v1::Upstream;
+pub use v1::StatusPageUpstream;
