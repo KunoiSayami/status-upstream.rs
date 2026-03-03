@@ -25,7 +25,7 @@ pub mod v1 {
         let upstream = Arc::new(upstream);
         Router::new()
             .route(
-                "/v1/components/:component_id",
+                "/v1/components/{component_id}",
                 axum::routing::get({
                     let conn = conn.clone();
                     |path| async move { get(Path(path), conn).await }
