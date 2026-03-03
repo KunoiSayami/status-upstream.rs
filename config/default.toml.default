@@ -1,24 +1,46 @@
-[statuspage]
-enabled = false
-oauth = ""
+# status-upstream server configuration
 
 [server]
-addr = "127.0.0.1"
+bind = "127.0.0.1"
 port = 41132
-auth_header = ""
+database = "status-upstream.db"
+auth_token = ""
+check_interval = 60
 public_status_page = false
-# database_location = "database.db"
 
-[[servers]]
-uuid = ""
+# Define monitored components
+[[components]]
+id = ""
 name = ""
-# use for status page [optional]
-identity_id = ""
-# use for status page [optional]
-page = ""
 
-[[servers]]
-uuid = ""
-name = ""
-identity_id = ""
-page = ""
+# Local checks (server spawns client subprocess for these)
+# [[local_checks]]
+# component_id = ""
+# type = "http"
+# url = "https://example.com/health"
+# expected_status = 200
+
+# [[local_checks]]
+# component_id = ""
+# type = "tcp"
+# host = "10.0.0.5"
+# port = 5432
+
+# [[local_checks]]
+# component_id = ""
+# type = "teamspeak"
+# host = "ts.example.com"
+# port = 9987
+
+# Statuspage.io notifier
+# [notifiers.statuspage]
+# enabled = false
+# api_key = "OAuth xxx"
+# [notifiers.statuspage.components]
+# "component-id" = { page_id = "abc123", component_id = "def456" }
+
+# Telegram notifier
+# [notifiers.telegram]
+# enabled = false
+# bot_token = ""
+# chat_id = ""

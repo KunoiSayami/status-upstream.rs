@@ -1,0 +1,63 @@
+# status-upstream client configuration
+
+[client]
+server_url = "http://127.0.0.1:41132"
+auth_token = ""
+client_id = ""
+check_interval = 30
+
+# Define checks to run
+
+# Shell command check (exit code 0 = operational)
+# [[checks]]
+# component_id = ""
+# type = "command"
+# command = "systemctl is-active myapp"
+# timeout = 10
+
+# TCP port check
+# [[checks]]
+# component_id = ""
+# type = "tcp"
+# host = "db.internal"
+# port = 5432
+# timeout = 10
+
+# HTTP health check
+# [[checks]]
+# component_id = ""
+# type = "http"
+# url = "http://localhost:8080/health"
+# expected_status = 200
+# timeout = 10
+
+# SSH banner check
+# [[checks]]
+# component_id = ""
+# type = "ssh"
+# host = "server.internal"
+# port = 22
+# timeout = 10
+
+# TeamSpeak UDP probe
+# [[checks]]
+# component_id = ""
+# type = "teamspeak"
+# host = "ts.example.com"
+# port = 9987
+# timeout = 10
+
+# Subnet scan (TCP port check across CIDR)
+# [[checks]]
+# component_id = ""
+# type = "subnet"
+# network = "192.168.1.0/24"
+# port = 22
+# timeout = 10
+
+# ICMP ping (requires "ping" feature, needs root/admin)
+# [[checks]]
+# component_id = ""
+# type = "ping"
+# host = "10.0.0.1"
+# timeout = 10
